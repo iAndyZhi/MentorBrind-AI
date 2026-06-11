@@ -24,6 +24,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 MAX_FILES_PER_QUERY = int(os.getenv("MAX_FILES_PER_QUERY", "160"))
 MAX_CHUNKS_FOR_MODEL = int(os.getenv("MAX_CHUNKS_FOR_MODEL", "8"))
+MAX_CANDIDATES_FOR_AI = int(os.getenv("MAX_CANDIDATES_FOR_AI", "30"))
 
 MIME_FOLDER = "application/vnd.google-apps.folder"
 MIME_DOC = "application/vnd.google-apps.document"
@@ -67,6 +68,34 @@ def drive_request(path: str, params: dict[str, str | None] | None = None) -> byt
         raise AppError(f"Google Drive connection failed: {exc.reason}") from exc
 
 
+def openai_request(input_text: str) -> str:
+    if not OPENAI_API_KEY:
+        raise AppError("Missing OPENAI_API_KEY. AI judgment requires an OpenAI API key.")
+
+    payload = json.dumps({"model": OPENAI_MODEL, "input": input_text}, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=payload,
+        headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise AppError(f"OpenAI API {exc.code}: {detail}") from exc
+
+    if data.get("output_text"):
+        return data["output_text"]
+    return "\n".join(
+        content.get("text", "")
+        for output in data.get("output", [])
+        for content in output.get("content", [])
+        if content.get("text")
+    )
+
+
 def list_children(parent_id: str) -> list[dict[str, Any]]:
     files: list[dict[str, Any]] = []
     page_token: str | None = None
@@ -98,10 +127,8 @@ def list_drive_tree(parent_id: str, relative_path: str = "") -> list[dict[str, A
             files.extend(list_drive_tree(file["id"], file_path))
         else:
             files.append({**file, "path": file_path})
-
         if len(files) >= MAX_FILES_PER_QUERY:
             break
-
     return files[:MAX_FILES_PER_QUERY]
 
 
@@ -118,7 +145,6 @@ def extract_docx(data: bytes) -> str:
     lines: list[str] = []
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         xml = archive.read("word/document.xml")
-
     root = ET.fromstring(xml)
     ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
     for paragraph in root.findall(".//w:p", ns):
@@ -178,19 +204,15 @@ def export_file_text(file: dict[str, Any]) -> str | None:
     return None
 
 
-def infer_topic(content: str) -> str:
-    text = content[:1200]
-    if re.search(r"股票|交易|金融|市场|美股|投资|仓位", text):
-        return "股票金融"
-    if re.search(r"医学|免疫|药|疾病|医院|癌|肿瘤|细胞", text):
-        return "医学医药"
-    if re.search(r"心理|创伤|情绪|自我|意识|欲望", text):
-        return "心理认知"
-    if re.search(r"AI|Claude|OpenAI|DeepSeek|模型", text, re.IGNORECASE):
-        return "AI"
-    if re.search(r"美国|中国|帝国|民主|法治|战争", text):
-        return "政治历史"
-    return "未分类"
+def make_chunk(file: dict[str, Any], content: str, index: int) -> dict[str, Any]:
+    return {
+        "id": f"{file['id']}#{index}",
+        "title": file["name"],
+        "source": file["path"],
+        "driveId": file["id"],
+        "modifiedTime": file.get("modifiedTime"),
+        "content": content,
+    }
 
 
 def split_into_chunks(file: dict[str, Any], content: str) -> list[dict[str, Any]]:
@@ -214,18 +236,6 @@ def split_into_chunks(file: dict[str, Any], content: str) -> list[dict[str, Any]
     return chunks
 
 
-def make_chunk(file: dict[str, Any], content: str, index: int) -> dict[str, Any]:
-    return {
-        "id": f"{file['id']}#{index}",
-        "title": file["name"],
-        "source": file["path"],
-        "driveId": file["id"],
-        "modifiedTime": file.get("modifiedTime"),
-        "topic": infer_topic(content),
-        "content": content,
-    }
-
-
 def tokenize(text: str) -> list[str]:
     normalized = text.lower()
     word_tokens = [token for token in re.split(r"[^\w]+", normalized, flags=re.UNICODE) if len(token) > 1]
@@ -234,33 +244,92 @@ def tokenize(text: str) -> list[str]:
     return list(dict.fromkeys([*word_tokens, *cjk_bigrams]))
 
 
-def score_chunks(query: str, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def rough_rank_chunks(query: str, chunks: list[dict[str, Any]], limit: int = MAX_CANDIDATES_FOR_AI) -> list[dict[str, Any]]:
+    """Only a coarse candidate reducer. It does not judge topic."""
     terms = tokenize(query)
     raw_query = query.lower()
-    topic_hints = [
-        {"topic": "AI", "words": ["ai", "claude", "openai", "deepseek", "模型", "谄媚", "顺从"]},
-        {"topic": "医学", "words": ["医学", "药", "用药", "医院", "免疫", "疾病", "癌", "肿瘤"]},
-        {"topic": "股票金融", "words": ["股票", "金融", "交易", "市场", "美股", "投资", "仓位"]},
-        {"topic": "心理", "words": ["心理", "情绪", "创伤", "自我", "意识", "欲望"]},
-        {"topic": "政治历史", "words": ["美国", "中国", "帝国", "民主", "战争", "民粹"]},
-    ]
-
     scored = []
     for item in chunks:
-        haystack = f"{item.get('title', '')} {item.get('topic', '')} {item.get('content', '')}".lower()
+        haystack = f"{item.get('title', '')} {item.get('content', '')}".lower()
         term_score = sum(2 for term in terms if term in haystack)
         phrase_score = 8 if raw_query and raw_query in haystack else 0
-        hint_score = 0
-        for hint in topic_hints:
-            query_matches = any(word.lower() in raw_query for word in hint["words"])
-            item_matches = hint["topic"].lower() in f"{item.get('topic', '')} {item.get('content', '')}".lower()
-            if query_matches and item_matches:
-                hint_score += 8
-        score = term_score + phrase_score + hint_score
+        score = term_score + phrase_score
         if score > 0:
-            scored.append({**item, "score": score})
+            scored.append({**item, "roughScore": score})
+    if not scored:
+        scored = [{**item, "roughScore": 0} for item in chunks[:limit]]
+    return sorted(scored, key=lambda item: item["roughScore"], reverse=True)[:limit]
 
-    return sorted(scored, key=lambda item: item["score"], reverse=True)[:MAX_CHUNKS_FOR_MODEL]
+
+def parse_json_object(text: str) -> dict[str, Any]:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not match:
+            raise
+        return json.loads(match.group(0))
+
+
+def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    if not OPENAI_API_KEY:
+        fallback = candidates[:MAX_CHUNKS_FOR_MODEL]
+        for item in fallback:
+            item["aiTopic"] = "AI未配置，未判断主题"
+        return {
+            "topic": "AI未配置，未判断主题",
+            "confidence": "low",
+            "selected": fallback,
+            "reason": "OPENAI_API_KEY is not set; using coarse text match only.",
+        }
+
+    compact_candidates = [
+        {
+            "id": item["id"],
+            "title": item["title"],
+            "source": item["source"],
+            "excerpt": item["content"][:900],
+        }
+        for item in candidates
+    ]
+    prompt = "\n".join([
+        "你是知识库检索裁判。不要用关键词粗暴判断主题，要根据语义、问题意图和候选片段内容来判断。",
+        "任务：从候选片段中选择最多 8 个真正能回答用户问题的片段，并给出这个问题的自然语言主题。",
+        "如果候选片段都不相关，selected_ids 返回空数组。",
+        "只返回 JSON，不要 Markdown。",
+        "JSON 格式：{\"topic\":\"...\",\"confidence\":\"high|medium|low\",\"selected_ids\":[\"...\"],\"reason\":\"...\"}",
+        "",
+        f"用户问题：{query}",
+        "",
+        "候选片段：",
+        json.dumps(compact_candidates, ensure_ascii=False),
+    ])
+    try:
+        judgment = parse_json_object(openai_request(prompt))
+    except Exception as exc:
+        fallback = candidates[:MAX_CHUNKS_FOR_MODEL]
+        for item in fallback:
+            item["aiTopic"] = "AI判断失败"
+        return {
+            "topic": "AI判断失败",
+            "confidence": "low",
+            "selected": fallback,
+            "reason": str(exc),
+        }
+
+    selected_ids = set(judgment.get("selected_ids", []))
+    selected = [item for item in candidates if item["id"] in selected_ids]
+    if not selected and candidates:
+        selected = candidates[: min(3, MAX_CHUNKS_FOR_MODEL)]
+    topic = judgment.get("topic") or "未判断"
+    for item in selected:
+        item["aiTopic"] = topic
+    return {
+        "topic": topic,
+        "confidence": judgment.get("confidence", "low"),
+        "selected": selected[:MAX_CHUNKS_FOR_MODEL],
+        "reason": judgment.get("reason", ""),
+    }
 
 
 def collect_drive_context(query: str) -> dict[str, Any]:
@@ -278,39 +347,49 @@ def collect_drive_context(query: str) -> dict[str, Any]:
         except Exception as exc:
             skipped.append({"name": file["name"], "path": file["path"], "mimeType": file["mimeType"], "reason": str(exc)})
 
+    candidates = rough_rank_chunks(query, chunks)
+    ai_judgment = ai_select_context(query, candidates)
     return {
         "scannedFiles": len(files),
         "textChunks": len(chunks),
         "skipped": skipped,
-        "matches": score_chunks(query, chunks),
+        "matches": ai_judgment["selected"],
+        "aiJudgment": {
+            "topic": ai_judgment["topic"],
+            "confidence": ai_judgment["confidence"],
+            "reason": ai_judgment["reason"],
+        },
     }
 
 
-def fallback_answer(query: str, matches: list[dict[str, Any]], skipped: list[dict[str, str]]) -> str:
+def fallback_answer(query: str, matches: list[dict[str, Any]], skipped: list[dict[str, str]], ai_judgment: dict[str, Any]) -> str:
+    if not OPENAI_API_KEY:
+        return "\n".join([
+            "当前没有配置 OPENAI_API_KEY，所以我不能让 AI 判断主题或生成最终回答。",
+            "我只做了粗略候选片段筛选，不会再声明这个问题属于某个主题。",
+            f"候选片段数：{len(matches)}；跳过文件数：{len(skipped)}。",
+            "配置 OpenAI key 后，系统会先让 AI 判断主题和引用片段，再生成回答。",
+        ])
+
     if not matches:
-        lines = ["我已经实时读取了 Google Drive，但没有找到足够相关的可导出文本片段。"]
+        lines = ["AI 判断后认为没有找到足够相关的 Drive 片段。"]
         if skipped:
             lines.append(f"有 {len(skipped)} 个文件因为格式或解析原因未参与本次检索。")
-        lines.append("如果关键资料在图片或扫描件里，下一步需要接 OCR；PDF/DOCX/RTF 已经尝试在内存中解析。")
         return "\n".join(lines)
 
-    themes = "、".join([item["topic"] for item in matches if item.get("topic")][:4])
     return "\n".join([
-        f"从实时读取的 Drive 笔记看，这个问题主要落在：{themes or '相关课程片段'}。",
+        f"AI 判断主题：{ai_judgment.get('topic', '未判断')}（置信度：{ai_judgment.get('confidence', 'low')}）",
         "",
-        "我会先抓住底层判断：不要急着站队，也不要只看眼前利益，而是回到机制、约束和风险。Brind 的表达习惯里，一个常见动作是先拆掉直觉，再问“这个现象背后的动力是什么”。",
-        "",
-        f"针对你的问题：“{query}”，当前未配置 OpenAI API，所以这里只返回本地检索式摘要。配置 OPENAI_API_KEY 后，会基于这些实时 Drive 片段生成完整 mentor 式回答。",
+        "已选出相关来源，但最终回答生成失败或未返回文本。请稍后重试。",
     ])
 
 
-def build_prompt(query: str, matches: list[dict[str, Any]]) -> str:
+def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: dict[str, Any]) -> str:
     context = "\n\n---\n\n".join(
         "\n".join([
             f"[{index + 1}] {item.get('title', 'Untitled')}",
             f"source: {item.get('source', 'unknown')}",
             f"modified: {item.get('modifiedTime', 'unknown')}",
-            f"topic: {item.get('topic', 'unknown')}",
             item.get("content", ""),
         ])
         for index, item in enumerate(matches)
@@ -318,45 +397,25 @@ def build_prompt(query: str, matches: list[dict[str, Any]]) -> str:
     return "\n".join([
         "你是一个基于 Brind 课程笔记构建的私人 AI mentor。",
         "你不能声称自己就是 Brind。你要参考资料中的观点、语言节奏和思考方式，但必须保持诚实。",
+        "不要根据关键词武断分类。主题判断以之前 AI 裁判结果为准。",
         "回答规则：",
         "1. 先给结论，再解释推理链。",
         "2. 如果资料不足，明确说不足，不要编造。",
         "3. 股票、金融、医疗问题只能做教育性分析，不能给确定性买卖或用药指令。",
         "4. 回答末尾列出引用来源编号。",
         "",
+        f"AI 判断主题：{ai_judgment.get('topic', '未判断')}",
         f"用户问题：{query}",
         "",
-        "实时从 Google Drive 读取到的资料：",
+        "实时从 Google Drive 读取并由 AI 选择的资料：",
         context or "无",
     ])
 
 
-def openai_response(query: str, matches: list[dict[str, Any]]) -> str | None:
+def openai_answer(query: str, matches: list[dict[str, Any]], ai_judgment: dict[str, Any]) -> str | None:
     if not OPENAI_API_KEY:
         return None
-
-    payload = json.dumps({"model": OPENAI_MODEL, "input": build_prompt(query, matches)}, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=payload,
-        headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=90) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise AppError(f"OpenAI API {exc.code}: {detail}") from exc
-
-    if data.get("output_text"):
-        return data["output_text"]
-    return "\n".join(
-        content.get("text", "")
-        for output in data.get("output", [])
-        for content in output.get("content", [])
-        if content.get("text")
-    )
+    return openai_request(build_answer_prompt(query, matches, ai_judgment))
 
 
 def serve_static(handler: BaseHTTPRequestHandler, request_path: str) -> None:
@@ -382,11 +441,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/api/sources":
             json_response(self, {
-                "mode": "python-drive-live-stateless",
+                "mode": "python-drive-live-ai-judged",
                 "folderId": DRIVE_FOLDER_ID,
                 "hasGoogleToken": bool(GOOGLE_ACCESS_TOKEN),
                 "hasOpenAIKey": bool(OPENAI_API_KEY),
                 "storesLocalDocuments": False,
+                "topicJudgment": "openai" if OPENAI_API_KEY else "disabled",
                 "supports": ["Google Docs", "txt", "markdown", "pdf", "docx", "rtf", "legacy doc best-effort"],
             })
             return
@@ -401,11 +461,17 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(length).decode("utf-8")
             message = json.loads(body or "{}").get("message", "")
             context = collect_drive_context(message)
-            answer = openai_response(message, context["matches"]) or fallback_answer(message, context["matches"], context["skipped"])
+            answer = openai_answer(message, context["matches"], context["aiJudgment"]) or fallback_answer(
+                message,
+                context["matches"],
+                context["skipped"],
+                context["aiJudgment"],
+            )
             json_response(self, {
                 "answer": answer,
                 "sources": context["matches"],
                 "skipped": context["skipped"][:20],
+                "aiJudgment": context["aiJudgment"],
                 "stats": {
                     "scannedFiles": context["scannedFiles"],
                     "textChunks": context["textChunks"],

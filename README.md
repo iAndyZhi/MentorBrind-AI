@@ -8,6 +8,7 @@ This version is designed to be GitHub-safe:
 - No local `corpus.jsonl`, raw text dump, extracted notes, or sync report is created.
 - The Python backend reads Google Drive live using `GOOGLE_ACCESS_TOKEN`.
 - Retrieved text only lives in memory for the current request.
+- Topic judgment and final source selection are delegated to OpenAI, not hard-coded keyword categories.
 - `.env`, `data/`, logs, virtualenvs, and caches are ignored by `.gitignore`.
 
 ## Run Locally
@@ -22,6 +23,7 @@ $env:GOOGLE_DRIVE_FOLDER_ID="1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC"
 $env:GOOGLE_ACCESS_TOKEN="<google-oauth-access-token>"
 $env:OPENAI_API_KEY="<openai-api-key>"
 $env:OPENAI_MODEL="gpt-5.4-mini"
+$env:MAX_CANDIDATES_FOR_AI="30"
 
 .\.venv\Scripts\python app.py
 ```
@@ -70,6 +72,18 @@ Still limited:
 - Legacy `.doc` is unreliable; convert to `.docx` or Google Docs when possible.
 
 Skipped files are listed in the chat response with reasons. The app does not write extracted text to disk.
+
+## Retrieval Flow
+
+Each chat request works live against Google Drive:
+
+1. List files in the configured Drive folder.
+2. Export or parse supported files in memory.
+3. Use a rough text match only to reduce the candidate set sent to the model.
+4. Ask OpenAI to judge the real topic semantically and choose the relevant snippets.
+5. Generate the mentor answer from the AI-selected snippets.
+
+The rough match is not treated as a topic classifier. If `OPENAI_API_KEY` is not configured, the app will say that AI topic judgment is disabled instead of inventing a topic label.
 
 ## GitHub Upload Checklist
 

@@ -9,10 +9,17 @@ const chunkCount = document.querySelector("#chunkCount");
 const skippedCount = document.querySelector("#skippedCount");
 const mode = document.querySelector("#mode");
 
-function addMessage(role, text, sources = [], skipped = []) {
+function addMessage(role, text, sources = [], skipped = [], aiJudgment = null) {
   const node = document.createElement("div");
   node.className = `message ${role}`;
   node.innerHTML = role === "assistant" ? `<strong>Brind Mentor</strong>\n${escapeHtml(text)}` : escapeHtml(text);
+
+  if (aiJudgment?.topic) {
+    const judgment = document.createElement("div");
+    judgment.className = "source";
+    judgment.textContent = `AI 判断主题：${aiJudgment.topic} · 置信度：${aiJudgment.confidence || "low"}`;
+    node.appendChild(judgment);
+  }
 
   if (sources.length) {
     const list = document.createElement("div");
@@ -20,7 +27,7 @@ function addMessage(role, text, sources = [], skipped = []) {
     for (const source of sources) {
       const item = document.createElement("div");
       item.className = "source";
-      item.textContent = `${source.source || source.title || "来源"} · ${source.topic || "未标注主题"}`;
+      item.textContent = source.source || source.title || "来源";
       list.appendChild(item);
     }
     node.appendChild(list);
@@ -77,7 +84,7 @@ form.addEventListener("submit", async (event) => {
     scannedCount.textContent = data.stats?.scannedFiles ?? "-";
     chunkCount.textContent = data.stats?.textChunks ?? "-";
     skippedCount.textContent = data.stats?.skippedFiles ?? "-";
-    addMessage("assistant", `${data.answer}\n\n模型：${data.model}`, data.sources, data.skipped);
+    addMessage("assistant", `${data.answer}\n\n模型：${data.model}`, data.sources, data.skipped, data.aiJudgment);
   } catch (error) {
     addMessage("assistant", `出错了：${error.message}`);
   } finally {
