@@ -6,21 +6,24 @@ This version is designed to be GitHub-safe:
 
 - No Brind documents are stored in the repo.
 - No local `corpus.jsonl`, raw text dump, extracted notes, or sync report is created.
-- The server reads Google Drive live using `GOOGLE_ACCESS_TOKEN`.
+- The Python backend reads Google Drive live using `GOOGLE_ACCESS_TOKEN`.
 - Retrieved text only lives in memory for the current request.
-- `.env`, `data/`, logs, and `node_modules/` are ignored by `.gitignore`.
+- `.env`, `data/`, logs, virtualenvs, and caches are ignored by `.gitignore`.
 
 ## Run Locally
 
 ```powershell
-cd C:\Users\mrand\Documents\Codex\2026-06-11\ai-mentor-google-drive-brind-openai\outputs\brind-mentor-mvp
+cd C:\Users\mrand\Documents\Codex\2026-06-11\ai-mentor-google-drive-brind-openai\outputs\MentorBrind-AI
+
+py -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements.txt
 
 $env:GOOGLE_DRIVE_FOLDER_ID="1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC"
 $env:GOOGLE_ACCESS_TOKEN="<google-oauth-access-token>"
 $env:OPENAI_API_KEY="<openai-api-key>"
 $env:OPENAI_MODEL="gpt-5.4-mini"
 
-node server.mjs
+.\.venv\Scripts\python app.py
 ```
 
 Open:
@@ -32,7 +35,8 @@ http://localhost:4173
 If the port is busy:
 
 ```powershell
-node server.mjs --port 4175
+$env:PORT="4175"
+.\.venv\Scripts\python app.py
 ```
 
 ## Google Drive Scope
@@ -51,49 +55,39 @@ The default folder is:
 
 ## What It Can Read Live
 
-Currently supported without local storage:
+Currently supported without local document storage:
 
 - Native Google Docs, exported as plain text through Drive API
 - Plain text / Markdown files
+- PDF files, parsed in memory with `pypdf`
+- DOCX files, parsed in memory with Python zip/xml
+- RTF files, parsed in memory with a lightweight cleaner
+- Legacy `.doc`, best-effort text recovery
 
-Skipped at runtime:
+Still limited:
 
-- PDF
-- DOCX / DOC
-- RTF
-- Images / scanned files
+- Images and scanned PDFs need OCR.
+- Legacy `.doc` is unreliable; convert to `.docx` or Google Docs when possible.
 
-Those skipped files are listed in the chat response. To support them without local storage, the next step is to add one of:
-
-- Google Drive conversion to native Docs before reading
-- in-memory DOCX/PDF parsers as server dependencies
-- OCR for images/scanned PDFs
-- OpenAI vector stores or another managed vector DB, if remote storage is acceptable
+Skipped files are listed in the chat response with reasons. The app does not write extracted text to disk.
 
 ## GitHub Upload Checklist
 
 Before pushing:
 
 ```powershell
-git init
-git add .gitignore .env.example package.json README.md server.mjs public
 git status
 ```
 
 Confirm these are **not** staged:
 
 - `.env`
+- `.venv/`
 - `data/`
 - any downloaded Drive folder
 - any `corpus.jsonl`
 - any extracted notes
 - logs or screenshots containing private content
-
-Then commit:
-
-```powershell
-git commit -m "Add stateless Drive-live Brind mentor MVP"
-```
 
 ## Deployment Notes
 

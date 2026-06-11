@@ -1,9 +1,12 @@
 .env
 .env.*
 !.env.example
+.venv/
+venv/
+__pycache__/
+*.pyc
 node_modules/
 data/
 *.log
 *.tmp
-__pycache__/
 .DS_Store
