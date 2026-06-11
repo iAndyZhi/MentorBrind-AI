@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Brind Mentor</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="sidebar">
+        <div>
+          <p class="eyebrow">Drive Live · Stateless</p>
+          <h1>Brind Mentor</h1>
+          <p class="subtle">只在运行时读取 Google Drive，不把资料写入本地或仓库。</p>
+        </div>
+
+        <section class="panel">
+          <div class="stat">
+            <span>Google Token</span>
+            <strong id="tokenStatus">-</strong>
+          </div>
+          <div class="stat">
+            <span>OpenAI Key</span>
+            <strong id="openaiStatus">-</strong>
+          </div>
+          <div class="stat">
+            <span>本地存储资料</span>
+            <strong id="storageStatus">否</strong>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="stat">
+            <span>本次扫描</span>
+            <strong id="scannedCount">-</strong>
+          </div>
+          <div class="stat">
+            <span>文本片段</span>
+            <strong id="chunkCount">-</strong>
+          </div>
+          <div class="stat">
+            <span>跳过文件</span>
+            <strong id="skippedCount">-</strong>
+          </div>
+        </section>
+
+        <section class="panel">
+          <label for="mode">回答模式</label>
+          <select id="mode">
+            <option>mentor</option>
+            <option>严格引用</option>
+            <option>新手解释</option>
+            <option>反向质疑</option>
+          </select>
+        </section>
+      </aside>
+
+      <section class="chat">
+        <div id="messages" class="messages">
+          <div class="message assistant">
+            <strong>Brind Mentor</strong>
+            <p>问一个关于股票、医学、心理、AI 或课程观点的问题。我会实时读取 Google Drive 文件夹，并只在内存里处理当次回答。</p>
+          </div>
+        </div>
+
+        <form id="chatForm" class="composer">
+          <input id="messageInput" autocomplete="off" placeholder="例如：Brind 怎么看 AI 的谄媚问题？" />
+          <button type="submit">发送</button>
+        </form>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
