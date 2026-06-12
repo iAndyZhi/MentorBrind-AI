@@ -102,6 +102,28 @@ select {
   background: white;
 }
 
+.access-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.access-form input {
+  padding: 10px;
+}
+
+.access-form button {
+  min-height: 40px;
+}
+
+.panel-note {
+  min-height: 18px;
+  margin: 8px 0 0;
+  color: #8b2f1f;
+  font-size: 13px;
+}
+
 .chat {
   display: grid;
   grid-template-rows: 1fr auto;

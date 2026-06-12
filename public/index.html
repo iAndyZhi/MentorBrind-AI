@@ -17,6 +17,10 @@
 
         <section class="panel">
           <div class="stat">
+            <span>App Access</span>
+            <strong id="accessStatus">-</strong>
+          </div>
+          <div class="stat">
             <span>Google Access</span>
             <strong id="tokenStatus">-</strong>
           </div>
@@ -34,6 +38,15 @@
           </div>
           <button id="connectDrive" class="secondary" type="button" hidden>Connect Google Drive</button>
           <button id="disconnectDrive" class="secondary danger" type="button" hidden>Disconnect</button>
+        </section>
+
+        <section id="accessPanel" class="panel" hidden>
+          <label for="accessCodeInput">Access Code</label>
+          <div class="access-form">
+            <input id="accessCodeInput" type="password" autocomplete="current-password" placeholder="Enter access code" />
+            <button id="unlockApp" type="button">Unlock</button>
+          </div>
+          <p id="accessError" class="panel-note"></p>
         </section>
 
         <section class="panel">

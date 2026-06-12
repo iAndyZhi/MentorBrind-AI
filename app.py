@@ -29,6 +29,7 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", f"{APP_BASE_URL}/api/auth/google/callback")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+APP_ACCESS_CODE = os.getenv("APP_ACCESS_CODE", "")
 MAX_FILES_PER_QUERY = int(os.getenv("MAX_FILES_PER_QUERY", "160"))
 MAX_CHUNKS_FOR_MODEL = int(os.getenv("MAX_CHUNKS_FOR_MODEL", "8"))
 MAX_CANDIDATES_FOR_AI = int(os.getenv("MAX_CANDIDATES_FOR_AI", "30"))
@@ -41,10 +42,12 @@ MIME_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 MIME_DOC_LEGACY = "application/msword"
 MIME_RTF = "application/rtf"
 SESSION_COOKIE = "mentorbrind_session"
+ACCESS_COOKIE = "mentorbrind_access"
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", str(30 * 24 * 60 * 60)))
 
 SESSIONS: dict[str, dict[str, Any]] = {}
+ACCESS_SESSIONS: dict[str, float] = {}
 OAUTH_STATES: dict[str, float] = {}
 
 
@@ -79,18 +82,74 @@ def parse_cookie(header: str | None) -> dict[str, str]:
     return {key: morsel.value for key, morsel in cookie.items()}
 
 
-def make_session_cookie(session_id: str, max_age: int) -> str:
+def make_cookie(name: str, value: str, max_age: int) -> str:
     cookie = http.cookies.SimpleCookie()
-    cookie[SESSION_COOKIE] = session_id
-    cookie[SESSION_COOKIE]["path"] = "/"
-    cookie[SESSION_COOKIE]["max-age"] = str(max_age)
-    cookie[SESSION_COOKIE]["httponly"] = True
-    cookie[SESSION_COOKIE]["samesite"] = "Lax"
+    cookie[name] = value
+    cookie[name]["path"] = "/"
+    cookie[name]["max-age"] = str(max_age)
+    cookie[name]["httponly"] = True
+    cookie[name]["samesite"] = "Lax"
     return cookie.output(header="").strip()
+
+
+def make_session_cookie(session_id: str, max_age: int) -> str:
+    return make_cookie(SESSION_COOKIE, session_id, max_age)
 
 
 def clear_session_cookie() -> str:
     return make_session_cookie("", 0)
+
+
+def make_access_cookie(access_id: str, max_age: int) -> str:
+    return make_cookie(ACCESS_COOKIE, access_id, max_age)
+
+
+def clear_access_cookie() -> str:
+    return make_access_cookie("", 0)
+
+
+def has_app_access(handler: BaseHTTPRequestHandler) -> bool:
+    if not APP_ACCESS_CODE:
+        return True
+    access_id = parse_cookie(handler.headers.get("Cookie")).get(ACCESS_COOKIE)
+    if not access_id:
+        return False
+    expires_at = ACCESS_SESSIONS.get(access_id, 0)
+    if expires_at <= time.time():
+        ACCESS_SESSIONS.pop(access_id, None)
+        return False
+    return True
+
+
+def require_app_access(handler: BaseHTTPRequestHandler) -> bool:
+    if has_app_access(handler):
+        return True
+    json_response(handler, {"error": "Access code required.", "requiresAccessCode": True}, 401)
+    return False
+
+
+def login_app_access(handler: BaseHTTPRequestHandler) -> None:
+    if not APP_ACCESS_CODE:
+        json_response(handler, {"ok": True, "enabled": False})
+        return
+
+    length = int(handler.headers.get("Content-Length", "0"))
+    body = handler.rfile.read(length).decode("utf-8")
+    code = json.loads(body or "{}").get("code", "")
+    if not secrets.compare_digest(str(code), APP_ACCESS_CODE):
+        json_response(handler, {"error": "Invalid access code."}, 401)
+        return
+
+    access_id = secrets.token_urlsafe(32)
+    ACCESS_SESSIONS[access_id] = time.time() + SESSION_MAX_AGE_SECONDS
+    json_response(handler, {"ok": True, "enabled": True}, headers={"Set-Cookie": make_access_cookie(access_id, SESSION_MAX_AGE_SECONDS)})
+
+
+def logout_app_access(handler: BaseHTTPRequestHandler) -> None:
+    access_id = parse_cookie(handler.headers.get("Cookie")).get(ACCESS_COOKIE)
+    if access_id:
+        ACCESS_SESSIONS.pop(access_id, None)
+    json_response(handler, {"ok": True}, headers={"Set-Cookie": clear_access_cookie()})
 
 
 def session_from_request(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
@@ -202,6 +261,8 @@ def openai_request(input_text: str) -> str:
 
 
 def start_google_oauth(handler: BaseHTTPRequestHandler) -> None:
+    if not require_app_access(handler):
+        return
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         json_response(handler, {"error": "Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET."}, 400)
         return
@@ -645,6 +706,12 @@ def serve_static(handler: BaseHTTPRequestHandler, request_path: str) -> None:
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/access/status":
+            json_response(self, {
+                "enabled": bool(APP_ACCESS_CODE),
+                "granted": has_app_access(self),
+            })
+            return
         if parsed.path == "/api/sources":
             has_session_token = bool(access_token_from_request(self))
             json_response(self, {
@@ -668,6 +735,12 @@ class Handler(BaseHTTPRequestHandler):
         serve_static(self, parsed.path)
 
     def do_POST(self) -> None:
+        if self.path == "/api/access/login":
+            login_app_access(self)
+            return
+        if self.path == "/api/access/logout":
+            logout_app_access(self)
+            return
         if self.path == "/api/auth/google/logout":
             logout_google(self)
             return
@@ -675,6 +748,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         try:
+            if not require_app_access(self):
+                return
             access_token = access_token_from_request(self)
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length).decode("utf-8")

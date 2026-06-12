@@ -1,6 +1,11 @@
 const messages = document.querySelector("#messages");
 const form = document.querySelector("#chatForm");
 const input = document.querySelector("#messageInput");
+const accessStatus = document.querySelector("#accessStatus");
+const accessPanel = document.querySelector("#accessPanel");
+const accessCodeInput = document.querySelector("#accessCodeInput");
+const accessError = document.querySelector("#accessError");
+const unlockApp = document.querySelector("#unlockApp");
 const tokenStatus = document.querySelector("#tokenStatus");
 const oauthStatus = document.querySelector("#oauthStatus");
 const openaiStatus = document.querySelector("#openaiStatus");
@@ -13,6 +18,7 @@ const connectDrive = document.querySelector("#connectDrive");
 const disconnectDrive = document.querySelector("#disconnectDrive");
 
 let sourceState = null;
+let accessState = { enabled: false, granted: true };
 
 function addMessage(role, text, sources = [], skipped = [], aiJudgment = null) {
   const node = document.createElement("div");
@@ -100,13 +106,58 @@ function updateAuthControls(data) {
   disconnectDrive.hidden = !data.hasGoogleToken || data.hasGoogleEnvToken;
 }
 
+function updateAccessControls(data) {
+  accessState = data;
+  accessStatus.textContent = data.enabled ? (data.granted ? "Unlocked" : "Locked") : "Open";
+  accessPanel.hidden = !data.enabled || data.granted;
+}
+
+async function loadAccessStatus() {
+  const res = await fetch("/api/access/status");
+  const data = await res.json();
+  updateAccessControls(data);
+  return data;
+}
+
 async function loadSources() {
   const res = await fetch("/api/sources");
   const data = await res.json();
   updateAuthControls(data);
 }
 
+unlockApp.addEventListener("click", async () => {
+  accessError.textContent = "";
+  unlockApp.disabled = true;
+  try {
+    const res = await fetch("/api/access/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: accessCodeInput.value })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || "Unlock failed.");
+    accessCodeInput.value = "";
+    await loadAccessStatus();
+    await loadSources();
+  } catch (error) {
+    accessError.textContent = error.message;
+  } finally {
+    unlockApp.disabled = false;
+  }
+});
+
+accessCodeInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    unlockApp.click();
+  }
+});
+
 connectDrive.addEventListener("click", () => {
+  if (accessState.enabled && !accessState.granted) {
+    accessCodeInput.focus();
+    return;
+  }
   window.location.href = "/api/auth/google/start";
 });
 
@@ -119,6 +170,12 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = input.value.trim();
   if (!text) return;
+
+  if (accessState.enabled && !accessState.granted) {
+    addMessage("assistant", "This app is locked. Enter the access code in the sidebar first.");
+    accessCodeInput.focus();
+    return;
+  }
 
   if (sourceState && !sourceState.hasGoogleToken) {
     addMessage("assistant", "Google Drive is not connected yet. Set GOOGLE_ACCESS_TOKEN or use the Connect Google Drive button in the sidebar.");
@@ -149,4 +206,4 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-loadSources();
+loadAccessStatus().then(loadSources);

@@ -9,6 +9,7 @@ A private AI mentor prototype built around Brind's notes, quotes, and records. T
 - Supports Google Docs, TXT, Markdown, PDF, DOCX, RTF, and best-effort legacy `.doc` parsing.
 - Uses rough text matching only to narrow candidates, then delegates topic judgment and final source selection to OpenAI.
 - Supports either a manually provided Google access token or an in-app Google OAuth login.
+- Supports an optional app access code for lightweight private sharing.
 - Returns numbered citations and short snippet previews for the sources selected by AI.
 - Generates mentor-style answers inspired by the notes' ideas, rhythm, and reasoning style, while staying honest that it is not Brind.
 - Treats stock, finance, and medical questions as educational analysis only, not as deterministic trading, investment, diagnosis, or medication instructions.
@@ -56,6 +57,7 @@ $env:GOOGLE_CLIENT_ID="<google-oauth-client-id>"
 $env:GOOGLE_CLIENT_SECRET="<google-oauth-client-secret>"
 $env:GOOGLE_REDIRECT_URI="http://localhost:4173/api/auth/google/callback"
 $env:SESSION_MAX_AGE_SECONDS="2592000"
+$env:APP_ACCESS_CODE="<optional-app-access-code>"
 $env:OPENAI_API_KEY="<openai-api-key>"
 $env:OPENAI_MODEL="gpt-5.4-mini"
 $env:MAX_CANDIDATES_FOR_AI="30"
@@ -86,6 +88,7 @@ $env:PORT="4175"
 | `GOOGLE_CLIENT_SECRET` | Optional Google OAuth client secret for in-app sign-in |
 | `GOOGLE_REDIRECT_URI` | OAuth callback URL, default `http://localhost:4173/api/auth/google/callback` |
 | `SESSION_MAX_AGE_SECONDS` | In-memory OAuth session lifetime, default 30 days |
+| `APP_ACCESS_CODE` | Optional lightweight app passcode. If set, users must unlock the app before chat or Google OAuth. |
 | `OPENAI_API_KEY` | OpenAI API key for topic judgment and final answers |
 | `OPENAI_MODEL` | Model used for judgment and answer generation |
 | `PORT` | Local server port, default `4173` |
@@ -124,6 +127,12 @@ http://localhost:4173/api/auth/google/callback
 4. Start the app and click **Connect Google Drive** in the sidebar.
 
 In this prototype, OAuth tokens are kept in process memory and associated with an HttpOnly session cookie. The app refreshes expired Google access tokens in memory when a refresh token is available. Restarting the server clears all sessions and requires signing in again.
+
+## Optional App Access Code
+
+Set `APP_ACCESS_CODE` to add a simple passcode gate for early private sharing. When it is set, users must unlock the app before they can start Google OAuth or send chat requests.
+
+This is intentionally lightweight and stored in process memory. It is useful for a private prototype, but it is not a replacement for production user accounts, audit logs, rate limits, or a proper authorization system.
 
 ## Supported File Types
 
