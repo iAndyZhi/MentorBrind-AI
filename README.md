@@ -49,6 +49,7 @@ The easiest preview path on Windows is:
 
 ```powershell
 cd C:\Users\mrand\Documents\Codex\2026-06-11\ai-mentor-google-drive-brind-openai\outputs\MentorBrind-AI
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 powershell -ExecutionPolicy Bypass -File .\scripts\preview.ps1
 ```
 
@@ -66,7 +67,9 @@ The preview script tries, in order:
 - `python`
 - Codex Desktop's bundled Python runtime
 
-If you only want to preview the UI, credentials are not required. Chat requests require Google Drive access and, for AI answers, an OpenAI key.
+Edit `.env` with your local credentials when you want live chat. If you only want to preview the UI, credentials are not required. Chat requests require Google Drive access and, for AI answers, an OpenAI key.
+
+The app automatically loads `.env` from the project root. Real environment variables still take priority over values in `.env`.
 
 ## Manual Run
 

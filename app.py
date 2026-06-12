@@ -20,6 +20,24 @@ from xml.etree import ElementTree as ET
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / "public"
 
+
+def load_dotenv(path: Path) -> None:
+    if not path.exists():
+        return
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+load_dotenv(ROOT / ".env")
+
 PORT = int(os.getenv("PORT", "4173"))
 APP_BASE_URL = os.getenv("APP_BASE_URL", f"http://localhost:{PORT}")
 DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC")

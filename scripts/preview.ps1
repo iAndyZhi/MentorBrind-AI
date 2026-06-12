@@ -43,4 +43,9 @@ if (-not $port) {
 
 Write-Host "Using Python: $python"
 Write-Host "Preview URL: http://localhost:$port"
+if (Test-Path (Join-Path $root ".env")) {
+  Write-Host "Loading local .env from project root"
+} else {
+  Write-Host "No .env found. UI preview still works; chat needs credentials."
+}
 & $python app.py
