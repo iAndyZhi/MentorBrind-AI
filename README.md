@@ -184,6 +184,10 @@ Limitations:
 
 ## API
 
+### `GET /api/health`
+
+Returns non-secret runtime diagnostics, including missing configuration, recommended setup actions, uptime, and whether the app is reading from `.env`.
+
 ### `GET /api/sources`
 
 Returns service status, including whether Google and OpenAI credentials are configured, whether local document storage is used, and which file types are supported.

@@ -67,6 +67,7 @@ SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", str(30 * 24 *
 SESSIONS: dict[str, dict[str, Any]] = {}
 ACCESS_SESSIONS: dict[str, float] = {}
 OAUTH_STATES: dict[str, float] = {}
+STARTED_AT = time.time()
 
 
 class AppError(Exception):
@@ -168,6 +169,46 @@ def logout_app_access(handler: BaseHTTPRequestHandler) -> None:
     if access_id:
         ACCESS_SESSIONS.pop(access_id, None)
     json_response(handler, {"ok": True}, headers={"Set-Cookie": clear_access_cookie()})
+
+
+def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
+    has_google_access = bool(access_token_from_request(handler))
+    has_oauth_config = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+    missing: list[str] = []
+    actions: list[str] = []
+
+    if not has_google_access:
+        missing.append("google_drive_access")
+        if has_oauth_config:
+            actions.append("Click Connect Google Drive in the sidebar.")
+        else:
+            actions.append("Set GOOGLE_ACCESS_TOKEN, or configure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.")
+
+    if not OPENAI_API_KEY:
+        missing.append("openai_api_key")
+        actions.append("Set OPENAI_API_KEY to enable AI topic judgment and final answers.")
+
+    if APP_ACCESS_CODE and not has_app_access(handler):
+        missing.append("app_access")
+        actions.append("Enter the app access code in the sidebar.")
+
+    return {
+        "ok": not missing,
+        "uptimeSeconds": int(time.time() - STARTED_AT),
+        "mode": "python-drive-live-ai-judged",
+        "missing": missing,
+        "actions": actions,
+        "config": {
+            "folderId": DRIVE_FOLDER_ID,
+            "hasGoogleAccess": has_google_access,
+            "hasGoogleEnvToken": bool(GOOGLE_ACCESS_TOKEN),
+            "hasGoogleOAuthConfig": has_oauth_config,
+            "hasOpenAIKey": bool(OPENAI_API_KEY),
+            "appAccessCodeEnabled": bool(APP_ACCESS_CODE),
+            "storesLocalDocuments": False,
+            "loadsDotEnv": (ROOT / ".env").exists(),
+        },
+    }
 
 
 def session_from_request(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
@@ -724,6 +765,9 @@ def serve_static(handler: BaseHTTPRequestHandler, request_path: str) -> None:
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/health":
+            json_response(self, health_payload(self))
+            return
         if parsed.path == "/api/access/status":
             json_response(self, {
                 "enabled": bool(APP_ACCESS_CODE),

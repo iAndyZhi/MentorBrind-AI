@@ -6,6 +6,8 @@ const accessPanel = document.querySelector("#accessPanel");
 const accessCodeInput = document.querySelector("#accessCodeInput");
 const accessError = document.querySelector("#accessError");
 const unlockApp = document.querySelector("#unlockApp");
+const healthStatus = document.querySelector("#healthStatus");
+const healthMessage = document.querySelector("#healthMessage");
 const tokenStatus = document.querySelector("#tokenStatus");
 const oauthStatus = document.querySelector("#oauthStatus");
 const openaiStatus = document.querySelector("#openaiStatus");
@@ -19,6 +21,7 @@ const disconnectDrive = document.querySelector("#disconnectDrive");
 
 let sourceState = null;
 let accessState = { enabled: false, granted: true };
+let healthState = null;
 
 function addMessage(role, text, sources = [], skipped = [], aiJudgment = null) {
   const node = document.createElement("div");
@@ -112,10 +115,23 @@ function updateAccessControls(data) {
   accessPanel.hidden = !data.enabled || data.granted;
 }
 
+function updateHealthControls(data) {
+  healthState = data;
+  healthStatus.textContent = data.ok ? "Ready" : "Setup needed";
+  healthMessage.textContent = data.ok ? "Drive and AI configuration look ready." : (data.actions || []).join(" ");
+}
+
 async function loadAccessStatus() {
   const res = await fetch("/api/access/status");
   const data = await res.json();
   updateAccessControls(data);
+  return data;
+}
+
+async function loadHealth() {
+  const res = await fetch("/api/health");
+  const data = await res.json();
+  updateHealthControls(data);
   return data;
 }
 
@@ -139,6 +155,7 @@ unlockApp.addEventListener("click", async () => {
     accessCodeInput.value = "";
     await loadAccessStatus();
     await loadSources();
+    await loadHealth();
   } catch (error) {
     accessError.textContent = error.message;
   } finally {
@@ -164,6 +181,7 @@ connectDrive.addEventListener("click", () => {
 disconnectDrive.addEventListener("click", async () => {
   await fetch("/api/auth/google/logout", { method: "POST" });
   await loadSources();
+  await loadHealth();
 });
 
 form.addEventListener("submit", async (event) => {
@@ -206,4 +224,6 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-loadAccessStatus().then(loadSources);
+loadAccessStatus()
+  .then(loadSources)
+  .then(loadHealth);
