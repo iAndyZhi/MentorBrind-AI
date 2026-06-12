@@ -17,8 +17,12 @@
 
         <section class="panel">
           <div class="stat">
-            <span>Google Token</span>
+            <span>Google Access</span>
             <strong id="tokenStatus">-</strong>
+          </div>
+          <div class="stat">
+            <span>OAuth</span>
+            <strong id="oauthStatus">-</strong>
           </div>
           <div class="stat">
             <span>OpenAI Key</span>
@@ -28,6 +32,8 @@
             <span>本地存储资料</span>
             <strong id="storageStatus">否</strong>
           </div>
+          <button id="connectDrive" class="secondary" type="button" hidden>Connect Google Drive</button>
+          <button id="disconnectDrive" class="secondary danger" type="button" hidden>Disconnect</button>
         </section>
 
         <section class="panel">
@@ -48,10 +54,10 @@
         <section class="panel">
           <label for="mode">回答模式</label>
           <select id="mode">
-            <option>mentor</option>
-            <option>严格引用</option>
-            <option>新手解释</option>
-            <option>反向质疑</option>
+            <option value="mentor">mentor</option>
+            <option value="strict citation">严格引用</option>
+            <option value="beginner explanation">新手解释</option>
+            <option value="challenge assumptions">反向质疑</option>
           </select>
         </section>
       </aside>

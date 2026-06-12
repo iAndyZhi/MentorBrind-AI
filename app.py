@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import http.cookies
 import io
 import json
 import os
 import re
+import secrets
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,8 +21,12 @@ ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / "public"
 
 PORT = int(os.getenv("PORT", "4173"))
+APP_BASE_URL = os.getenv("APP_BASE_URL", f"http://localhost:{PORT}")
 DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC")
 GOOGLE_ACCESS_TOKEN = os.getenv("GOOGLE_ACCESS_TOKEN", "")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", f"{APP_BASE_URL}/api/auth/google/callback")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 MAX_FILES_PER_QUERY = int(os.getenv("MAX_FILES_PER_QUERY", "160"))
@@ -33,31 +40,89 @@ MIME_PDF = "application/pdf"
 MIME_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 MIME_DOC_LEGACY = "application/msword"
 MIME_RTF = "application/rtf"
+SESSION_COOKIE = "mentorbrind_session"
+DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+
+SESSIONS: dict[str, dict[str, Any]] = {}
+OAUTH_STATES: dict[str, float] = {}
 
 
 class AppError(Exception):
     pass
 
 
-def json_response(handler: BaseHTTPRequestHandler, payload: dict[str, Any], status: int = 200) -> None:
+def json_response(handler: BaseHTTPRequestHandler, payload: dict[str, Any], status: int = 200, headers: dict[str, str] | None = None) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
+    for key, value in (headers or {}).items():
+        handler.send_header(key, value)
     handler.end_headers()
     handler.wfile.write(body)
 
 
-def drive_request(path: str, params: dict[str, str | None] | None = None) -> bytes:
-    if not GOOGLE_ACCESS_TOKEN:
-        raise AppError("Missing GOOGLE_ACCESS_TOKEN. Set a Google OAuth access token with Drive read scope.")
+def redirect_response(handler: BaseHTTPRequestHandler, location: str, headers: dict[str, str] | None = None) -> None:
+    handler.send_response(302)
+    handler.send_header("Location", location)
+    for key, value in (headers or {}).items():
+        handler.send_header(key, value)
+    handler.end_headers()
+
+
+def parse_cookie(header: str | None) -> dict[str, str]:
+    if not header:
+        return {}
+    cookie = http.cookies.SimpleCookie()
+    cookie.load(header)
+    return {key: morsel.value for key, morsel in cookie.items()}
+
+
+def make_session_cookie(session_id: str, max_age: int) -> str:
+    cookie = http.cookies.SimpleCookie()
+    cookie[SESSION_COOKIE] = session_id
+    cookie[SESSION_COOKIE]["path"] = "/"
+    cookie[SESSION_COOKIE]["max-age"] = str(max_age)
+    cookie[SESSION_COOKIE]["httponly"] = True
+    cookie[SESSION_COOKIE]["samesite"] = "Lax"
+    return cookie.output(header="").strip()
+
+
+def clear_session_cookie() -> str:
+    return make_session_cookie("", 0)
+
+
+def session_from_request(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
+    session_id = parse_cookie(handler.headers.get("Cookie")).get(SESSION_COOKIE)
+    if not session_id:
+        return None
+    session = SESSIONS.get(session_id)
+    if not session:
+        return None
+    expires_at = session.get("expiresAt", 0)
+    if expires_at and expires_at <= time.time():
+        SESSIONS.pop(session_id, None)
+        return None
+    return session
+
+
+def access_token_from_request(handler: BaseHTTPRequestHandler) -> str:
+    if GOOGLE_ACCESS_TOKEN:
+        return GOOGLE_ACCESS_TOKEN
+    session = session_from_request(handler)
+    return session.get("accessToken", "") if session else ""
+
+
+def drive_request(access_token: str, path: str, params: dict[str, str | None] | None = None) -> bytes:
+    if not access_token:
+        raise AppError("Missing Google Drive access. Set GOOGLE_ACCESS_TOKEN or sign in with Google.")
 
     query = urllib.parse.urlencode({k: v for k, v in (params or {}).items() if v is not None})
     url = f"https://www.googleapis.com/drive/v3/{path}"
     if query:
         url = f"{url}?{query}"
 
-    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {GOOGLE_ACCESS_TOKEN}"})
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {access_token}"})
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             return response.read()
@@ -96,12 +161,82 @@ def openai_request(input_text: str) -> str:
     )
 
 
-def list_children(parent_id: str) -> list[dict[str, Any]]:
+def start_google_oauth(handler: BaseHTTPRequestHandler) -> None:
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        json_response(handler, {"error": "Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET."}, 400)
+        return
+
+    state = secrets.token_urlsafe(24)
+    OAUTH_STATES[state] = time.time() + 600
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": DRIVE_SCOPE,
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state,
+    }
+    redirect_response(handler, f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}")
+
+
+def complete_google_oauth(handler: BaseHTTPRequestHandler, query: dict[str, list[str]]) -> None:
+    state = query.get("state", [""])[0]
+    code = query.get("code", [""])[0]
+    state_expiry = OAUTH_STATES.pop(state, 0)
+    if not state or not code or state_expiry <= time.time():
+        redirect_response(handler, "/?auth=failed")
+        return
+
+    payload = urllib.parse.urlencode({
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "code": code,
+        "grant_type": "authorization_code",
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        "https://oauth2.googleapis.com/token",
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            token_data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError:
+        redirect_response(handler, "/?auth=failed")
+        return
+
+    access_token = token_data.get("access_token", "")
+    if not access_token:
+        redirect_response(handler, "/?auth=failed")
+        return
+
+    expires_in = int(token_data.get("expires_in", 3600))
+    session_id = secrets.token_urlsafe(32)
+    SESSIONS[session_id] = {
+        "accessToken": access_token,
+        "refreshToken": token_data.get("refresh_token", ""),
+        "expiresAt": time.time() + max(60, expires_in - 60),
+    }
+    redirect_response(handler, "/?auth=ok", {"Set-Cookie": make_session_cookie(session_id, expires_in)})
+
+
+def logout_google(handler: BaseHTTPRequestHandler) -> None:
+    session_id = parse_cookie(handler.headers.get("Cookie")).get(SESSION_COOKIE)
+    if session_id:
+        SESSIONS.pop(session_id, None)
+    json_response(handler, {"ok": True}, headers={"Set-Cookie": clear_session_cookie()})
+
+
+def list_children(access_token: str, parent_id: str) -> list[dict[str, Any]]:
     files: list[dict[str, Any]] = []
     page_token: str | None = None
 
     while True:
         payload = drive_request(
+            access_token,
             "files",
             {
                 "q": f"'{parent_id}' in parents and trashed = false",
@@ -119,12 +254,12 @@ def list_children(parent_id: str) -> list[dict[str, Any]]:
             return files
 
 
-def list_drive_tree(parent_id: str, relative_path: str = "") -> list[dict[str, Any]]:
+def list_drive_tree(access_token: str, parent_id: str, relative_path: str = "") -> list[dict[str, Any]]:
     files: list[dict[str, Any]] = []
-    for file in list_children(parent_id):
+    for file in list_children(access_token, parent_id):
         file_path = f"{relative_path}/{file['name']}" if relative_path else file["name"]
         if file["mimeType"] == MIME_FOLDER:
-            files.extend(list_drive_tree(file["id"], file_path))
+            files.extend(list_drive_tree(access_token, file["id"], file_path))
         else:
             files.append({**file, "path": file_path})
         if len(files) >= MAX_FILES_PER_QUERY:
@@ -132,12 +267,12 @@ def list_drive_tree(parent_id: str, relative_path: str = "") -> list[dict[str, A
     return files[:MAX_FILES_PER_QUERY]
 
 
-def download_file(file: dict[str, Any]) -> bytes:
-    return drive_request(f"files/{file['id']}", {"alt": "media", "supportsAllDrives": "true"})
+def download_file(access_token: str, file: dict[str, Any]) -> bytes:
+    return drive_request(access_token, f"files/{file['id']}", {"alt": "media", "supportsAllDrives": "true"})
 
 
-def export_google_doc(file: dict[str, Any]) -> str:
-    payload = drive_request(f"files/{file['id']}/export", {"mimeType": "text/plain"})
+def export_google_doc(access_token: str, file: dict[str, Any]) -> str:
+    payload = drive_request(access_token, f"files/{file['id']}/export", {"mimeType": "text/plain"})
     return payload.decode("utf-8", errors="replace")
 
 
@@ -185,22 +320,22 @@ def extract_legacy_doc(data: bytes) -> str:
     return text
 
 
-def export_file_text(file: dict[str, Any]) -> str | None:
+def export_file_text(access_token: str, file: dict[str, Any]) -> str | None:
     name = file["name"].lower()
     mime = file["mimeType"]
 
     if mime == MIME_DOC:
-        return export_google_doc(file)
+        return export_google_doc(access_token, file)
     if mime in MIME_TEXT or name.endswith((".txt", ".md", ".markdown")):
-        return download_file(file).decode("utf-8", errors="replace")
+        return download_file(access_token, file).decode("utf-8", errors="replace")
     if mime == MIME_DOCX or name.endswith(".docx"):
-        return extract_docx(download_file(file))
+        return extract_docx(download_file(access_token, file))
     if mime == MIME_PDF or name.endswith(".pdf"):
-        return extract_pdf(download_file(file))
+        return extract_pdf(download_file(access_token, file))
     if mime == MIME_RTF or name.endswith(".rtf"):
-        return extract_rtf(download_file(file))
+        return extract_rtf(download_file(access_token, file))
     if mime == MIME_DOC_LEGACY or name.endswith(".doc"):
-        return extract_legacy_doc(download_file(file))
+        return extract_legacy_doc(download_file(access_token, file))
     return None
 
 
@@ -332,14 +467,14 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
     }
 
 
-def collect_drive_context(query: str) -> dict[str, Any]:
-    files = list_drive_tree(DRIVE_FOLDER_ID)
+def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
+    files = list_drive_tree(access_token, DRIVE_FOLDER_ID)
     skipped: list[dict[str, str]] = []
     chunks: list[dict[str, Any]] = []
 
     for file in files:
         try:
-            text = export_file_text(file)
+            text = export_file_text(access_token, file)
             if not text:
                 skipped.append({"name": file["name"], "path": file["path"], "mimeType": file["mimeType"], "reason": "Unsupported live export type"})
                 continue
@@ -439,28 +574,42 @@ def serve_static(handler: BaseHTTPRequestHandler, request_path: str) -> None:
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        if self.path == "/api/sources":
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/sources":
+            has_session_token = bool(access_token_from_request(self))
             json_response(self, {
                 "mode": "python-drive-live-ai-judged",
                 "folderId": DRIVE_FOLDER_ID,
-                "hasGoogleToken": bool(GOOGLE_ACCESS_TOKEN),
+                "hasGoogleToken": has_session_token,
+                "hasGoogleEnvToken": bool(GOOGLE_ACCESS_TOKEN),
+                "hasGoogleOAuthConfig": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
                 "hasOpenAIKey": bool(OPENAI_API_KEY),
                 "storesLocalDocuments": False,
                 "topicJudgment": "openai" if OPENAI_API_KEY else "disabled",
                 "supports": ["Google Docs", "txt", "markdown", "pdf", "docx", "rtf", "legacy doc best-effort"],
             })
             return
-        serve_static(self, urllib.parse.urlparse(self.path).path)
+        if parsed.path == "/api/auth/google/start":
+            start_google_oauth(self)
+            return
+        if parsed.path == "/api/auth/google/callback":
+            complete_google_oauth(self, urllib.parse.parse_qs(parsed.query))
+            return
+        serve_static(self, parsed.path)
 
     def do_POST(self) -> None:
+        if self.path == "/api/auth/google/logout":
+            logout_google(self)
+            return
         if self.path != "/api/chat":
             self.send_error(404)
             return
         try:
+            access_token = access_token_from_request(self)
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length).decode("utf-8")
             message = json.loads(body or "{}").get("message", "")
-            context = collect_drive_context(message)
+            context = collect_drive_context(access_token, message)
             answer = openai_answer(message, context["matches"], context["aiJudgment"]) or fallback_answer(
                 message,
                 context["matches"],

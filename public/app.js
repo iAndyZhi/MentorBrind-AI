@@ -2,12 +2,17 @@ const messages = document.querySelector("#messages");
 const form = document.querySelector("#chatForm");
 const input = document.querySelector("#messageInput");
 const tokenStatus = document.querySelector("#tokenStatus");
+const oauthStatus = document.querySelector("#oauthStatus");
 const openaiStatus = document.querySelector("#openaiStatus");
 const storageStatus = document.querySelector("#storageStatus");
 const scannedCount = document.querySelector("#scannedCount");
 const chunkCount = document.querySelector("#chunkCount");
 const skippedCount = document.querySelector("#skippedCount");
 const mode = document.querySelector("#mode");
+const connectDrive = document.querySelector("#connectDrive");
+const disconnectDrive = document.querySelector("#disconnectDrive");
+
+let sourceState = null;
 
 function addMessage(role, text, sources = [], skipped = [], aiJudgment = null) {
   const node = document.createElement("div");
@@ -56,18 +61,41 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;");
 }
 
+function updateAuthControls(data) {
+  sourceState = data;
+  tokenStatus.textContent = data.hasGoogleToken ? "已连接" : "未连接";
+  oauthStatus.textContent = data.hasGoogleOAuthConfig ? "可用" : "未配置";
+  openaiStatus.textContent = data.hasOpenAIKey ? "已配置" : "未配置";
+  storageStatus.textContent = data.storesLocalDocuments ? "是" : "否";
+
+  connectDrive.hidden = data.hasGoogleToken || !data.hasGoogleOAuthConfig;
+  disconnectDrive.hidden = !data.hasGoogleToken || data.hasGoogleEnvToken;
+}
+
 async function loadSources() {
   const res = await fetch("/api/sources");
   const data = await res.json();
-  tokenStatus.textContent = data.hasGoogleToken ? "已配置" : "未配置";
-  openaiStatus.textContent = data.hasOpenAIKey ? "已配置" : "未配置";
-  storageStatus.textContent = data.storesLocalDocuments ? "是" : "否";
+  updateAuthControls(data);
 }
+
+connectDrive.addEventListener("click", () => {
+  window.location.href = "/api/auth/google/start";
+});
+
+disconnectDrive.addEventListener("click", async () => {
+  await fetch("/api/auth/google/logout", { method: "POST" });
+  await loadSources();
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = input.value.trim();
   if (!text) return;
+
+  if (sourceState && !sourceState.hasGoogleToken) {
+    addMessage("assistant", "还没有连接 Google Drive。请先配置 GOOGLE_ACCESS_TOKEN，或使用左侧按钮完成 Google OAuth 登录。");
+    return;
+  }
 
   input.value = "";
   form.querySelector("button").disabled = true;

@@ -197,6 +197,14 @@ button.secondary {
   color: var(--accent);
 }
 
+button.danger {
+  color: #8b2f1f;
+}
+
+button[hidden] {
+  display: none;
+}
+
 button:disabled {
   cursor: wait;
   opacity: 0.7;

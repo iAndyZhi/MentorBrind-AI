@@ -8,6 +8,7 @@ A private AI mentor prototype built around Brind's notes, quotes, and records. T
 - Stores no Brind source documents, extracted text, local corpus, or knowledge-base snapshot.
 - Supports Google Docs, TXT, Markdown, PDF, DOCX, RTF, and best-effort legacy `.doc` parsing.
 - Uses rough text matching only to narrow candidates, then delegates topic judgment and final source selection to OpenAI.
+- Supports either a manually provided Google access token or an in-app Google OAuth login.
 - Generates mentor-style answers inspired by the notes' ideas, rhythm, and reasoning style, while staying honest that it is not Brind.
 - Treats stock, finance, and medical questions as educational analysis only, not as deterministic trading, investment, diagnosis, or medication instructions.
 
@@ -19,6 +20,7 @@ This repository is designed to be safe for a private GitHub repo because it only
 - Google Drive files are not committed.
 - No `corpus.jsonl`, local vector database, raw-text cache, or sync report is generated or committed.
 - Retrieved Drive text exists only in memory during the current request.
+- OAuth access tokens are held in server memory only in the current prototype. They are not written to disk.
 - `.gitignore` excludes virtual environments, caches, logs, `data/`, and other local artifacts.
 
 ## Requirements
@@ -49,6 +51,9 @@ py -m venv .venv
 
 $env:GOOGLE_DRIVE_FOLDER_ID="1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC"
 $env:GOOGLE_ACCESS_TOKEN="<google-oauth-access-token>"
+$env:GOOGLE_CLIENT_ID="<google-oauth-client-id>"
+$env:GOOGLE_CLIENT_SECRET="<google-oauth-client-secret>"
+$env:GOOGLE_REDIRECT_URI="http://localhost:4173/api/auth/google/callback"
 $env:OPENAI_API_KEY="<openai-api-key>"
 $env:OPENAI_MODEL="gpt-5.4-mini"
 $env:MAX_CANDIDATES_FOR_AI="30"
@@ -74,7 +79,10 @@ $env:PORT="4175"
 | Variable | Purpose |
 | --- | --- |
 | `GOOGLE_DRIVE_FOLDER_ID` | Google Drive folder ID to read from |
-| `GOOGLE_ACCESS_TOKEN` | Google OAuth access token with Drive read permission |
+| `GOOGLE_ACCESS_TOKEN` | Optional manual Google OAuth access token with Drive read permission |
+| `GOOGLE_CLIENT_ID` | Optional Google OAuth client ID for in-app sign-in |
+| `GOOGLE_CLIENT_SECRET` | Optional Google OAuth client secret for in-app sign-in |
+| `GOOGLE_REDIRECT_URI` | OAuth callback URL, default `http://localhost:4173/api/auth/google/callback` |
 | `OPENAI_API_KEY` | OpenAI API key for topic judgment and final answers |
 | `OPENAI_MODEL` | Model used for judgment and answer generation |
 | `PORT` | Local server port, default `4173` |
@@ -95,6 +103,24 @@ Every chat request reads Drive live:
 The rough match is only a token-cost reducer. It is not treated as a topic classifier. Topic judgment no longer depends on hard-coded keyword rules, which avoids errors such as classifying a stock question as a medical or psychology topic.
 
 If `OPENAI_API_KEY` is not configured, the app clearly reports that AI topic judgment is disabled instead of inventing a topic label.
+
+## Google OAuth Login
+
+For local development, you can either paste a short-lived `GOOGLE_ACCESS_TOKEN` into the environment or configure Google OAuth and use the in-app **Connect Google Drive** button.
+
+To use OAuth:
+
+1. Create an OAuth client in Google Cloud.
+2. Add this authorized redirect URI:
+
+```text
+http://localhost:4173/api/auth/google/callback
+```
+
+3. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+4. Start the app and click **Connect Google Drive** in the sidebar.
+
+In this prototype, the OAuth token is kept in process memory and associated with an HttpOnly session cookie. Restarting the server clears the session and requires signing in again.
 
 ## Supported File Types
 
@@ -158,7 +184,7 @@ Do not commit:
 
 ## Deployment Notes
 
-The current prototype uses a manually provided `GOOGLE_ACCESS_TOKEN`, which is fine for local development. For a hosted app, replace it with a proper Google OAuth flow:
+The current prototype includes a lightweight in-memory OAuth flow, which is fine for local development. For a hosted app, move token storage to a secure secret store or encrypted database:
 
 1. The user signs in with Google.
 2. The server stores the refresh token securely.
