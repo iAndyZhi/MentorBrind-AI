@@ -42,6 +42,7 @@ MIME_DOC_LEGACY = "application/msword"
 MIME_RTF = "application/rtf"
 SESSION_COOKIE = "mentorbrind_session"
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", str(30 * 24 * 60 * 60)))
 
 SESSIONS: dict[str, dict[str, Any]] = {}
 OAUTH_STATES: dict[str, float] = {}
@@ -99,18 +100,57 @@ def session_from_request(handler: BaseHTTPRequestHandler) -> dict[str, Any] | No
     session = SESSIONS.get(session_id)
     if not session:
         return None
-    expires_at = session.get("expiresAt", 0)
-    if expires_at and expires_at <= time.time():
+    session_expires_at = session.get("sessionExpiresAt", 0)
+    if session_expires_at and session_expires_at <= time.time():
         SESSIONS.pop(session_id, None)
         return None
     return session
+
+
+def refresh_google_session(session: dict[str, Any]) -> bool:
+    refresh_token = session.get("refreshToken", "")
+    if not refresh_token or not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        return False
+
+    payload = urllib.parse.urlencode({
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token",
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        "https://oauth2.googleapis.com/token",
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            token_data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError:
+        return False
+
+    access_token = token_data.get("access_token", "")
+    if not access_token:
+        return False
+
+    expires_in = int(token_data.get("expires_in", 3600))
+    session["accessToken"] = access_token
+    session["accessExpiresAt"] = time.time() + max(60, expires_in - 60)
+    return True
 
 
 def access_token_from_request(handler: BaseHTTPRequestHandler) -> str:
     if GOOGLE_ACCESS_TOKEN:
         return GOOGLE_ACCESS_TOKEN
     session = session_from_request(handler)
-    return session.get("accessToken", "") if session else ""
+    if not session:
+        return ""
+    access_expires_at = session.get("accessExpiresAt", 0)
+    if access_expires_at and access_expires_at <= time.time():
+        if not refresh_google_session(session):
+            return ""
+    return session.get("accessToken", "")
 
 
 def drive_request(access_token: str, path: str, params: dict[str, str | None] | None = None) -> bytes:
@@ -218,9 +258,10 @@ def complete_google_oauth(handler: BaseHTTPRequestHandler, query: dict[str, list
     SESSIONS[session_id] = {
         "accessToken": access_token,
         "refreshToken": token_data.get("refresh_token", ""),
-        "expiresAt": time.time() + max(60, expires_in - 60),
+        "accessExpiresAt": time.time() + max(60, expires_in - 60),
+        "sessionExpiresAt": time.time() + SESSION_MAX_AGE_SECONDS,
     }
-    redirect_response(handler, "/?auth=ok", {"Set-Cookie": make_session_cookie(session_id, expires_in)})
+    redirect_response(handler, "/?auth=ok", {"Set-Cookie": make_session_cookie(session_id, SESSION_MAX_AGE_SECONDS)})
 
 
 def logout_google(handler: BaseHTTPRequestHandler) -> None:
