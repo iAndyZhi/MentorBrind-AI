@@ -9,6 +9,7 @@ A private AI mentor prototype built around Brind's notes, quotes, and records. T
 - Supports Google Docs, TXT, Markdown, PDF, DOCX, RTF, and best-effort legacy `.doc` parsing.
 - Uses rough text matching only to narrow candidates, then delegates topic judgment and final source selection to OpenAI.
 - Supports either a manually provided Google access token or an in-app Google OAuth login.
+- Returns numbered citations and short snippet previews for the sources selected by AI.
 - Generates mentor-style answers inspired by the notes' ideas, rhythm, and reasoning style, while staying honest that it is not Brind.
 - Treats stock, finance, and medical questions as educational analysis only, not as deterministic trading, investment, diagnosis, or medication instructions.
 
@@ -159,7 +160,7 @@ Request:
 Response includes:
 
 - `answer`: mentor-style answer
-- `sources`: AI-selected source snippets
+- `sources`: AI-selected source snippets with citation number, file path, modified time, and short excerpt
 - `aiJudgment`: AI-generated topic, confidence, and reason
 - `stats`: scanned file count, text chunk count, skipped file count
 - `skipped`: files that could not be read and the reason

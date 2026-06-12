@@ -311,7 +311,7 @@ def extract_rtf(data: bytes) -> str:
 
 def extract_legacy_doc(data: bytes) -> str:
     utf16 = data.decode("utf-16le", errors="ignore")
-    utf16_runs = re.findall(r"[\w\s\u4e00-\u9fff，。！？；：、“”‘’（）《》]{8,}", utf16)
+    utf16_runs = re.findall(r"[\w\s\u4e00-\u9fff,\.;:!\?\(\)\[\]\-]{8,}", utf16)
     latin = data.decode("latin-1", errors="ignore")
     latin_runs = re.findall(r"[A-Za-z0-9 ,.;:!?()'\-]{12,}", latin)
     text = "\n".join(run.strip() for run in [*utf16_runs, *latin_runs] if run.strip())
@@ -339,6 +339,13 @@ def export_file_text(access_token: str, file: dict[str, Any]) -> str | None:
     return None
 
 
+def clean_excerpt(text: str, limit: int = 420) -> str:
+    compact = re.sub(r"\s+", " ", text).strip()
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[:limit].rstrip()}..."
+
+
 def make_chunk(file: dict[str, Any], content: str, index: int) -> dict[str, Any]:
     return {
         "id": f"{file['id']}#{index}",
@@ -346,7 +353,9 @@ def make_chunk(file: dict[str, Any], content: str, index: int) -> dict[str, Any]
         "source": file["path"],
         "driveId": file["id"],
         "modifiedTime": file.get("modifiedTime"),
+        "chunkIndex": index,
         "content": content,
+        "excerpt": clean_excerpt(content),
     }
 
 
@@ -410,9 +419,9 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
     if not OPENAI_API_KEY:
         fallback = candidates[:MAX_CHUNKS_FOR_MODEL]
         for item in fallback:
-            item["aiTopic"] = "AI未配置，未判断主题"
+            item["aiTopic"] = "AI topic judgment disabled"
         return {
-            "topic": "AI未配置，未判断主题",
+            "topic": "AI topic judgment disabled",
             "confidence": "low",
             "selected": fallback,
             "reason": "OPENAI_API_KEY is not set; using coarse text match only.",
@@ -428,15 +437,16 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
         for item in candidates
     ]
     prompt = "\n".join([
-        "你是知识库检索裁判。不要用关键词粗暴判断主题，要根据语义、问题意图和候选片段内容来判断。",
-        "任务：从候选片段中选择最多 8 个真正能回答用户问题的片段，并给出这个问题的自然语言主题。",
-        "如果候选片段都不相关，selected_ids 返回空数组。",
-        "只返回 JSON，不要 Markdown。",
-        "JSON 格式：{\"topic\":\"...\",\"confidence\":\"high|medium|low\",\"selected_ids\":[\"...\"],\"reason\":\"...\"}",
+        "You are a retrieval judge for a private knowledge base.",
+        "Do not classify the user topic by hard-coded keywords. Judge semantically from the user intent and candidate snippets.",
+        "Pick up to 8 snippets that can truly help answer the user question, and produce a natural-language topic label.",
+        "If none of the candidates are relevant, return an empty selected_ids array.",
+        "Return JSON only, no Markdown.",
+        "Schema: {\"topic\":\"...\",\"confidence\":\"high|medium|low\",\"selected_ids\":[\"...\"],\"reason\":\"...\"}",
         "",
-        f"用户问题：{query}",
+        f"User question: {query}",
         "",
-        "候选片段：",
+        "Candidate snippets:",
         json.dumps(compact_candidates, ensure_ascii=False),
     ])
     try:
@@ -444,9 +454,9 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
     except Exception as exc:
         fallback = candidates[:MAX_CHUNKS_FOR_MODEL]
         for item in fallback:
-            item["aiTopic"] = "AI判断失败"
+            item["aiTopic"] = "AI judgment failed"
         return {
-            "topic": "AI判断失败",
+            "topic": "AI judgment failed",
             "confidence": "low",
             "selected": fallback,
             "reason": str(exc),
@@ -456,7 +466,7 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
     selected = [item for item in candidates if item["id"] in selected_ids]
     if not selected and candidates:
         selected = candidates[: min(3, MAX_CHUNKS_FOR_MODEL)]
-    topic = judgment.get("topic") or "未判断"
+    topic = judgment.get("topic") or "Not judged"
     for item in selected:
         item["aiTopic"] = topic
     return {
@@ -465,6 +475,23 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
         "selected": selected[:MAX_CHUNKS_FOR_MODEL],
         "reason": judgment.get("reason", ""),
     }
+
+
+def public_sources(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    for index, item in enumerate(matches):
+        sources.append({
+            "citation": index + 1,
+            "title": item.get("title", "Untitled"),
+            "source": item.get("source", "unknown"),
+            "driveId": item.get("driveId", ""),
+            "modifiedTime": item.get("modifiedTime", ""),
+            "chunkIndex": item.get("chunkIndex", 0),
+            "excerpt": item.get("excerpt", clean_excerpt(item.get("content", ""))),
+            "aiTopic": item.get("aiTopic", ""),
+            "roughScore": item.get("roughScore", 0),
+        })
+    return sources
 
 
 def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
@@ -489,6 +516,7 @@ def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
         "textChunks": len(chunks),
         "skipped": skipped,
         "matches": ai_judgment["selected"],
+        "sources": public_sources(ai_judgment["selected"]),
         "aiJudgment": {
             "topic": ai_judgment["topic"],
             "confidence": ai_judgment["confidence"],
@@ -500,22 +528,22 @@ def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
 def fallback_answer(query: str, matches: list[dict[str, Any]], skipped: list[dict[str, str]], ai_judgment: dict[str, Any]) -> str:
     if not OPENAI_API_KEY:
         return "\n".join([
-            "当前没有配置 OPENAI_API_KEY，所以我不能让 AI 判断主题或生成最终回答。",
-            "我只做了粗略候选片段筛选，不会再声明这个问题属于某个主题。",
-            f"候选片段数：{len(matches)}；跳过文件数：{len(skipped)}。",
-            "配置 OpenAI key 后，系统会先让 AI 判断主题和引用片段，再生成回答。",
+            "OPENAI_API_KEY is not configured, so AI topic judgment and final answer generation are disabled.",
+            "The app only performed coarse candidate filtering and will not invent a topic label.",
+            f"Candidate snippets: {len(matches)}; skipped files: {len(skipped)}.",
+            "After configuring an OpenAI key, the app will ask AI to judge the topic, select citations, and generate the answer.",
         ])
 
     if not matches:
-        lines = ["AI 判断后认为没有找到足够相关的 Drive 片段。"]
+        lines = ["AI judged that no sufficiently relevant Drive snippets were found."]
         if skipped:
-            lines.append(f"有 {len(skipped)} 个文件因为格式或解析原因未参与本次检索。")
+            lines.append(f"{len(skipped)} files were skipped because of unsupported formats or parsing errors.")
         return "\n".join(lines)
 
     return "\n".join([
-        f"AI 判断主题：{ai_judgment.get('topic', '未判断')}（置信度：{ai_judgment.get('confidence', 'low')}）",
+        f"AI topic: {ai_judgment.get('topic', 'Not judged')} (confidence: {ai_judgment.get('confidence', 'low')})",
         "",
-        "已选出相关来源，但最终回答生成失败或未返回文本。请稍后重试。",
+        "Relevant sources were selected, but final answer generation failed or returned no text. Please try again.",
     ])
 
 
@@ -530,20 +558,21 @@ def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: 
         for index, item in enumerate(matches)
     )
     return "\n".join([
-        "你是一个基于 Brind 课程笔记构建的私人 AI mentor。",
-        "你不能声称自己就是 Brind。你要参考资料中的观点、语言节奏和思考方式，但必须保持诚实。",
-        "不要根据关键词武断分类。主题判断以之前 AI 裁判结果为准。",
-        "回答规则：",
-        "1. 先给结论，再解释推理链。",
-        "2. 如果资料不足，明确说不足，不要编造。",
-        "3. 股票、金融、医疗问题只能做教育性分析，不能给确定性买卖或用药指令。",
-        "4. 回答末尾列出引用来源编号。",
+        "You are a private AI mentor built from Brind course notes.",
+        "Never claim to be Brind. Use the notes' ideas, rhythm, and reasoning style while staying honest about uncertainty.",
+        "Answer in the same language as the user's question unless the user asks otherwise.",
+        "Do not classify by keywords. Treat the earlier AI retrieval judgment as the topic signal.",
+        "Rules:",
+        "1. Start with the conclusion, then explain the reasoning.",
+        "2. If the sources are insufficient, say so clearly and do not fabricate.",
+        "3. For stock, finance, or medical questions, provide educational analysis only. Do not give deterministic buy/sell, diagnosis, or medication instructions.",
+        "4. Cite source numbers in the answer, using forms like [1] or [2].",
         "",
-        f"AI 判断主题：{ai_judgment.get('topic', '未判断')}",
-        f"用户问题：{query}",
+        f"AI judged topic: {ai_judgment.get('topic', 'Not judged')}",
+        f"User question: {query}",
         "",
-        "实时从 Google Drive 读取并由 AI 选择的资料：",
-        context or "无",
+        "Live Google Drive sources selected by AI:",
+        context or "None",
     ])
 
 
@@ -618,7 +647,7 @@ class Handler(BaseHTTPRequestHandler):
             )
             json_response(self, {
                 "answer": answer,
-                "sources": context["matches"],
+                "sources": context["sources"],
                 "skipped": context["skipped"][:20],
                 "aiJudgment": context["aiJudgment"],
                 "stats": {

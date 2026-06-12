@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -12,7 +12,7 @@
         <div>
           <p class="eyebrow">Drive Live · Stateless</p>
           <h1>Brind Mentor</h1>
-          <p class="subtle">只在运行时读取 Google Drive，不把资料写入本地或仓库。</p>
+          <p class="subtle">Reads Google Drive at request time. Source documents are not written to local storage or committed to the repo.</p>
         </div>
 
         <section class="panel">
@@ -29,8 +29,8 @@
             <strong id="openaiStatus">-</strong>
           </div>
           <div class="stat">
-            <span>本地存储资料</span>
-            <strong id="storageStatus">否</strong>
+            <span>Local Corpus</span>
+            <strong id="storageStatus">No</strong>
           </div>
           <button id="connectDrive" class="secondary" type="button" hidden>Connect Google Drive</button>
           <button id="disconnectDrive" class="secondary danger" type="button" hidden>Disconnect</button>
@@ -38,26 +38,26 @@
 
         <section class="panel">
           <div class="stat">
-            <span>本次扫描</span>
+            <span>Scanned</span>
             <strong id="scannedCount">-</strong>
           </div>
           <div class="stat">
-            <span>文本片段</span>
+            <span>Text Chunks</span>
             <strong id="chunkCount">-</strong>
           </div>
           <div class="stat">
-            <span>跳过文件</span>
+            <span>Skipped</span>
             <strong id="skippedCount">-</strong>
           </div>
         </section>
 
         <section class="panel">
-          <label for="mode">回答模式</label>
+          <label for="mode">Answer Mode</label>
           <select id="mode">
             <option value="mentor">mentor</option>
-            <option value="strict citation">严格引用</option>
-            <option value="beginner explanation">新手解释</option>
-            <option value="challenge assumptions">反向质疑</option>
+            <option value="strict citation">strict citation</option>
+            <option value="beginner explanation">beginner explanation</option>
+            <option value="challenge assumptions">challenge assumptions</option>
           </select>
         </section>
       </aside>
@@ -66,13 +66,13 @@
         <div id="messages" class="messages">
           <div class="message assistant">
             <strong>Brind Mentor</strong>
-            <p>问一个关于股票、医学、心理、AI 或课程观点的问题。我会实时读取 Google Drive 文件夹，并只在内存里处理当次回答。</p>
+            <p>Ask about stocks, medicine, psychology, AI, or Brind-style course ideas. I will read the Drive folder live and keep the processing in memory for this request.</p>
           </div>
         </div>
 
         <form id="chatForm" class="composer">
-          <input id="messageInput" autocomplete="off" placeholder="例如：Brind 怎么看 AI 的谄媚问题？" />
-          <button type="submit">发送</button>
+          <input id="messageInput" autocomplete="off" placeholder="Example: How would Brind think about AI sycophancy?" />
+          <button type="submit">Send</button>
         </form>
       </section>
     </main>

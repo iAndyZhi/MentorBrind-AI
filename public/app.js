@@ -21,8 +21,8 @@ function addMessage(role, text, sources = [], skipped = [], aiJudgment = null) {
 
   if (aiJudgment?.topic) {
     const judgment = document.createElement("div");
-    judgment.className = "source";
-    judgment.textContent = `AI 判断主题：${aiJudgment.topic} · 置信度：${aiJudgment.confidence || "low"}`;
+    judgment.className = "source topic";
+    judgment.textContent = `AI topic: ${aiJudgment.topic} · confidence: ${aiJudgment.confidence || "low"}`;
     node.appendChild(judgment);
   }
 
@@ -30,10 +30,7 @@ function addMessage(role, text, sources = [], skipped = [], aiJudgment = null) {
     const list = document.createElement("div");
     list.className = "sources";
     for (const source of sources) {
-      const item = document.createElement("div");
-      item.className = "source";
-      item.textContent = source.source || source.title || "来源";
-      list.appendChild(item);
+      list.appendChild(renderSource(source));
     }
     node.appendChild(list);
   }
@@ -41,7 +38,7 @@ function addMessage(role, text, sources = [], skipped = [], aiJudgment = null) {
   if (skipped.length) {
     const list = document.createElement("details");
     list.className = "skipped";
-    list.innerHTML = `<summary>跳过文件 ${skipped.length} 个</summary>`;
+    list.innerHTML = `<summary>Skipped files: ${skipped.length}</summary>`;
     for (const file of skipped.slice(0, 10)) {
       const item = document.createElement("div");
       item.textContent = `${file.path || file.name}: ${file.reason}`;
@@ -54,6 +51,37 @@ function addMessage(role, text, sources = [], skipped = [], aiJudgment = null) {
   messages.scrollTop = messages.scrollHeight;
 }
 
+function renderSource(source) {
+  const card = document.createElement("details");
+  card.className = "source source-card";
+  card.open = true;
+
+  const summary = document.createElement("summary");
+  summary.textContent = `[${source.citation}] ${source.title || "Untitled"}`;
+  card.appendChild(summary);
+
+  const path = document.createElement("div");
+  path.className = "source-path";
+  path.textContent = source.source || "unknown source";
+  card.appendChild(path);
+
+  if (source.modifiedTime) {
+    const modified = document.createElement("div");
+    modified.className = "source-meta";
+    modified.textContent = `Modified: ${source.modifiedTime}`;
+    card.appendChild(modified);
+  }
+
+  if (source.excerpt) {
+    const excerpt = document.createElement("p");
+    excerpt.className = "source-excerpt";
+    excerpt.textContent = source.excerpt;
+    card.appendChild(excerpt);
+  }
+
+  return card;
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -63,10 +91,10 @@ function escapeHtml(value) {
 
 function updateAuthControls(data) {
   sourceState = data;
-  tokenStatus.textContent = data.hasGoogleToken ? "已连接" : "未连接";
-  oauthStatus.textContent = data.hasGoogleOAuthConfig ? "可用" : "未配置";
-  openaiStatus.textContent = data.hasOpenAIKey ? "已配置" : "未配置";
-  storageStatus.textContent = data.storesLocalDocuments ? "是" : "否";
+  tokenStatus.textContent = data.hasGoogleToken ? "Connected" : "Not connected";
+  oauthStatus.textContent = data.hasGoogleOAuthConfig ? "Available" : "Not configured";
+  openaiStatus.textContent = data.hasOpenAIKey ? "Configured" : "Missing";
+  storageStatus.textContent = data.storesLocalDocuments ? "Yes" : "No";
 
   connectDrive.hidden = data.hasGoogleToken || !data.hasGoogleOAuthConfig;
   disconnectDrive.hidden = !data.hasGoogleToken || data.hasGoogleEnvToken;
@@ -93,7 +121,7 @@ form.addEventListener("submit", async (event) => {
   if (!text) return;
 
   if (sourceState && !sourceState.hasGoogleToken) {
-    addMessage("assistant", "还没有连接 Google Drive。请先配置 GOOGLE_ACCESS_TOKEN，或使用左侧按钮完成 Google OAuth 登录。");
+    addMessage("assistant", "Google Drive is not connected yet. Set GOOGLE_ACCESS_TOKEN or use the Connect Google Drive button in the sidebar.");
     return;
   }
 
@@ -112,9 +140,9 @@ form.addEventListener("submit", async (event) => {
     scannedCount.textContent = data.stats?.scannedFiles ?? "-";
     chunkCount.textContent = data.stats?.textChunks ?? "-";
     skippedCount.textContent = data.stats?.skippedFiles ?? "-";
-    addMessage("assistant", `${data.answer}\n\n模型：${data.model}`, data.sources, data.skipped, data.aiJudgment);
+    addMessage("assistant", `${data.answer}\n\nModel: ${data.model}`, data.sources, data.skipped, data.aiJudgment);
   } catch (error) {
-    addMessage("assistant", `出错了：${error.message}`);
+    addMessage("assistant", `Error: ${error.message}`);
   } finally {
     form.querySelector("button").disabled = false;
     input.focus();

@@ -147,6 +147,33 @@ select {
   font-size: 13px;
 }
 
+.source.topic {
+  margin-top: 12px;
+}
+
+.source-card {
+  border: 1px solid #d6e6ea;
+}
+
+.source-card summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.source-path,
+.source-meta {
+  margin-top: 6px;
+  color: #4d6268;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.source-excerpt {
+  margin: 8px 0 0;
+  color: #1f3d45;
+  line-height: 1.5;
+}
+
 .skipped {
   margin-top: 12px;
   padding: 10px;
