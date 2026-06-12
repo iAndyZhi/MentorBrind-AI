@@ -43,13 +43,38 @@ Default Google Drive folder ID:
 1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC
 ```
 
-## Run Locally
+## Preview Locally
+
+The easiest preview path on Windows is:
+
+```powershell
+cd C:\Users\mrand\Documents\Codex\2026-06-11\ai-mentor-google-drive-brind-openai\outputs\MentorBrind-AI
+powershell -ExecutionPolicy Bypass -File .\scripts\preview.ps1
+```
+
+Then open:
+
+```text
+http://localhost:4173
+```
+
+The preview script tries, in order:
+
+- `PYTHON` environment variable, if set
+- `.venv\Scripts\python.exe`
+- `py`
+- `python`
+- Codex Desktop's bundled Python runtime
+
+If you only want to preview the UI, credentials are not required. Chat requests require Google Drive access and, for AI answers, an OpenAI key.
+
+## Manual Run
 
 ```powershell
 cd C:\Users\mrand\Documents\Codex\2026-06-11\ai-mentor-google-drive-brind-openai\outputs\MentorBrind-AI
 
-py -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements.txt
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
 $env:GOOGLE_DRIVE_FOLDER_ID="1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC"
 $env:GOOGLE_ACCESS_TOKEN="<google-oauth-access-token>"
@@ -62,8 +87,10 @@ $env:OPENAI_API_KEY="<openai-api-key>"
 $env:OPENAI_MODEL="gpt-5.4-mini"
 $env:MAX_CANDIDATES_FOR_AI="30"
 
-.\.venv\Scripts\python app.py
+.\.venv\Scripts\python.exe app.py
 ```
+
+If your system does not have `python` or `py` on PATH, install Python 3.11+ or set `PYTHON` to a full `python.exe` path before using `scripts\preview.ps1`.
 
 Open:
 
