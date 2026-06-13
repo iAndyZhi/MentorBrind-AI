@@ -66,7 +66,7 @@ function renderSource(source) {
   card.open = true;
 
   const summary = document.createElement("summary");
-  summary.textContent = `[${source.citation}] ${source.title || "Untitled"}`;
+  summary.textContent = `[${source.citation}] ${source.title || source.label || "Protected source"}`;
   card.appendChild(summary);
 
   const path = document.createElement("div");

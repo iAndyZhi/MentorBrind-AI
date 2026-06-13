@@ -48,6 +48,8 @@ GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", f"{APP_BASE_URL}/api/auth
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 APP_ACCESS_CODE = os.getenv("APP_ACCESS_CODE", "")
+EXPOSE_SOURCE_METADATA = os.getenv("EXPOSE_SOURCE_METADATA", "").lower() in {"1", "true", "yes"}
+EXPOSE_SOURCE_EXCERPTS = os.getenv("EXPOSE_SOURCE_EXCERPTS", "").lower() in {"1", "true", "yes"}
 MAX_FILES_PER_QUERY = int(os.getenv("MAX_FILES_PER_QUERY", "160"))
 MAX_CHUNKS_FOR_MODEL = int(os.getenv("MAX_CHUNKS_FOR_MODEL", "8"))
 MAX_CANDIDATES_FOR_AI = int(os.getenv("MAX_CANDIDATES_FOR_AI", "30"))
@@ -205,6 +207,8 @@ def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
             "hasGoogleOAuthConfig": has_oauth_config,
             "hasOpenAIKey": bool(OPENAI_API_KEY),
             "appAccessCodeEnabled": bool(APP_ACCESS_CODE),
+            "exposesSourceMetadata": EXPOSE_SOURCE_METADATA,
+            "exposesSourceExcerpts": EXPOSE_SOURCE_EXCERPTS,
             "storesLocalDocuments": False,
             "loadsDotEnv": (ROOT / ".env").exists(),
         },
@@ -641,17 +645,21 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
 def public_sources(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
     sources: list[dict[str, Any]] = []
     for index, item in enumerate(matches):
-        sources.append({
+        source = {
             "citation": index + 1,
-            "title": item.get("title", "Untitled"),
-            "source": item.get("source", "unknown"),
-            "driveId": item.get("driveId", ""),
-            "modifiedTime": item.get("modifiedTime", ""),
-            "chunkIndex": item.get("chunkIndex", 0),
-            "excerpt": item.get("excerpt", clean_excerpt(item.get("content", ""))),
-            "aiTopic": item.get("aiTopic", ""),
-            "roughScore": item.get("roughScore", 0),
-        })
+            "label": f"Source {index + 1}",
+        }
+        if EXPOSE_SOURCE_METADATA:
+            source.update({
+                "title": item.get("title", "Untitled"),
+                "source": item.get("source", "unknown"),
+                "modifiedTime": item.get("modifiedTime", ""),
+                "chunkIndex": item.get("chunkIndex", 0),
+                "aiTopic": item.get("aiTopic", ""),
+            })
+        if EXPOSE_SOURCE_EXCERPTS:
+            source["excerpt"] = item.get("excerpt", clean_excerpt(item.get("content", "")))
+        sources.append(source)
     return sources
 
 
@@ -728,6 +736,7 @@ def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: 
         "2. If the sources are insufficient, say so clearly and do not fabricate.",
         "3. For stock, finance, or medical questions, provide educational analysis only. Do not give deterministic buy/sell, diagnosis, or medication instructions.",
         "4. Cite source numbers in the answer, using forms like [1] or [2].",
+        "5. Do not reveal raw source passages or long quotes. Synthesize the answer from the sources instead.",
         "",
         f"AI judged topic: {ai_judgment.get('topic', 'Not judged')}",
         f"User question: {query}",

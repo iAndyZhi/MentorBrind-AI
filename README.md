@@ -10,7 +10,7 @@ A private AI mentor prototype built around Brind's notes, quotes, and records. T
 - Uses rough text matching only to narrow candidates, then delegates topic judgment and final source selection to OpenAI.
 - Supports either a manually provided Google access token or an in-app Google OAuth login.
 - Supports an optional app access code for lightweight private sharing.
-- Returns numbered citations and short snippet previews for the sources selected by AI.
+- Returns protected numbered citations by default, without raw source text, Drive IDs, file paths, or snippet previews.
 - Generates mentor-style answers inspired by the notes' ideas, rhythm, and reasoning style, while staying honest that it is not Brind.
 - Treats stock, finance, and medical questions as educational analysis only, not as deterministic trading, investment, diagnosis, or medication instructions.
 
@@ -23,6 +23,7 @@ This repository is designed to be safe for a private GitHub repo because it only
 - No `corpus.jsonl`, local vector database, raw-text cache, or sync report is generated or committed.
 - Retrieved Drive text exists only in memory during the current request.
 - OAuth access and refresh tokens are held in server memory only in the current prototype. They are not written to disk.
+- User-facing chat responses do not expose retrieved chunks by default. The model sees sources server-side, but the API returns protected citation labels unless explicitly configured otherwise.
 - `.gitignore` excludes virtual environments, caches, logs, `data/`, and other local artifacts.
 
 ## Requirements
@@ -119,6 +120,8 @@ $env:PORT="4175"
 | `GOOGLE_REDIRECT_URI` | OAuth callback URL, default `http://localhost:4173/api/auth/google/callback` |
 | `SESSION_MAX_AGE_SECONDS` | In-memory OAuth session lifetime, default 30 days |
 | `APP_ACCESS_CODE` | Optional lightweight app passcode. If set, users must unlock the app before chat or Google OAuth. |
+| `EXPOSE_SOURCE_METADATA` | Optional debug flag. Default `false`; when true, source titles/paths/modified times can be returned to the UI. |
+| `EXPOSE_SOURCE_EXCERPTS` | Optional debug flag. Default `false`; when true, snippet excerpts can be returned to the UI. Do not enable for users who should not see source data. |
 | `OPENAI_API_KEY` | OpenAI API key for topic judgment and final answers |
 | `OPENAI_MODEL` | Model used for judgment and answer generation |
 | `PORT` | Local server port, default `4173` |
@@ -205,7 +208,7 @@ Request:
 Response includes:
 
 - `answer`: mentor-style answer
-- `sources`: AI-selected source snippets with citation number, file path, modified time, and short excerpt
+- `sources`: protected AI-selected citation labels by default. Source metadata and excerpts are hidden unless debug exposure flags are enabled.
 - `aiJudgment`: AI-generated topic, confidence, and reason
 - `stats`: scanned file count, text chunk count, skipped file count
 - `skipped`: files that could not be read and the reason
