@@ -12,7 +12,7 @@
         <div>
           <p class="eyebrow">Drive Live / Stateless</p>
           <h1>Brind Mentor</h1>
-          <p class="subtle">Reads Google Drive at request time. Source documents are not written to local storage or committed to the repo.</p>
+          <p class="subtle">Reads Google Drive into an in-memory index. Source documents are not written to local storage or committed to the repo.</p>
         </div>
 
         <section class="panel">
@@ -58,6 +58,18 @@
         </section>
 
         <section class="panel">
+          <div class="panel-header">
+            <label>Knowledge Index</label>
+            <button id="refreshIndex" class="icon-button" type="button" title="Refresh Drive index">Refresh</button>
+          </div>
+          <div class="stat">
+            <span>Status</span>
+            <strong id="indexStatus">-</strong>
+          </div>
+          <div class="stat">
+            <span>Refresh In</span>
+            <strong id="indexRefreshIn">-</strong>
+          </div>
           <div class="stat">
             <span>Scanned</span>
             <strong id="scannedCount">-</strong>

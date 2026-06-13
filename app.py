@@ -6,6 +6,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -32,7 +33,7 @@ def load_dotenv(path: Path) -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip().strip("\"'")
-        if key and key not in os.environ:
+        if key:
             os.environ[key] = value
 
 
@@ -47,12 +48,13 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", f"{APP_BASE_URL}/api/auth/google/callback")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
-APP_ACCESS_CODE = os.getenv("APP_ACCESS_CODE", "")
+APP_ACCESS_CODE = os.getenv("APP_ACCESS_CODE", "").strip()
 EXPOSE_SOURCE_METADATA = os.getenv("EXPOSE_SOURCE_METADATA", "").lower() in {"1", "true", "yes"}
 EXPOSE_SOURCE_EXCERPTS = os.getenv("EXPOSE_SOURCE_EXCERPTS", "").lower() in {"1", "true", "yes"}
 MAX_FILES_PER_QUERY = int(os.getenv("MAX_FILES_PER_QUERY", "160"))
 MAX_CHUNKS_FOR_MODEL = int(os.getenv("MAX_CHUNKS_FOR_MODEL", "8"))
 MAX_CANDIDATES_FOR_AI = int(os.getenv("MAX_CANDIDATES_FOR_AI", "30"))
+DRIVE_INDEX_TTL_SECONDS = int(os.getenv("DRIVE_INDEX_TTL_SECONDS", "900"))
 
 MIME_FOLDER = "application/vnd.google-apps.folder"
 MIME_DOC = "application/vnd.google-apps.document"
@@ -70,6 +72,16 @@ SESSIONS: dict[str, dict[str, Any]] = {}
 ACCESS_SESSIONS: dict[str, float] = {}
 OAUTH_STATES: dict[str, float] = {}
 STARTED_AT = time.time()
+DRIVE_INDEX_LOCK = threading.Lock()
+DRIVE_INDEX_CACHE: dict[str, Any] = {
+    "folderId": "",
+    "builtAt": 0.0,
+    "expiresAt": 0.0,
+    "files": [],
+    "chunks": [],
+    "skipped": [],
+    "lastError": "",
+}
 
 
 class AppError(Exception):
@@ -156,7 +168,7 @@ def login_app_access(handler: BaseHTTPRequestHandler) -> None:
 
     length = int(handler.headers.get("Content-Length", "0"))
     body = handler.rfile.read(length).decode("utf-8")
-    code = json.loads(body or "{}").get("code", "")
+    code = str(json.loads(body or "{}").get("code", "")).strip()
     if not secrets.compare_digest(str(code), APP_ACCESS_CODE):
         json_response(handler, {"error": "Invalid access code."}, 401)
         return
@@ -207,10 +219,12 @@ def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
             "hasGoogleOAuthConfig": has_oauth_config,
             "hasOpenAIKey": bool(OPENAI_API_KEY),
             "appAccessCodeEnabled": bool(APP_ACCESS_CODE),
+            "accessCodeLength": len(APP_ACCESS_CODE),
             "exposesSourceMetadata": EXPOSE_SOURCE_METADATA,
             "exposesSourceExcerpts": EXPOSE_SOURCE_EXCERPTS,
             "storesLocalDocuments": False,
             "loadsDotEnv": (ROOT / ".env").exists(),
+            "driveIndex": index_status_payload(),
         },
     }
 
@@ -663,7 +677,25 @@ def public_sources(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sources
 
 
-def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
+def index_status_payload() -> dict[str, Any]:
+    now = time.time()
+    built_at = float(DRIVE_INDEX_CACHE.get("builtAt") or 0)
+    expires_at = float(DRIVE_INDEX_CACHE.get("expiresAt") or 0)
+    return {
+        "cached": bool(DRIVE_INDEX_CACHE.get("chunks")),
+        "folderId": DRIVE_INDEX_CACHE.get("folderId") or DRIVE_FOLDER_ID,
+        "builtAt": int(built_at) if built_at else None,
+        "ageSeconds": int(now - built_at) if built_at else None,
+        "expiresInSeconds": max(0, int(expires_at - now)) if expires_at else 0,
+        "ttlSeconds": DRIVE_INDEX_TTL_SECONDS,
+        "scannedFiles": len(DRIVE_INDEX_CACHE.get("files") or []),
+        "textChunks": len(DRIVE_INDEX_CACHE.get("chunks") or []),
+        "skippedFiles": len(DRIVE_INDEX_CACHE.get("skipped") or []),
+        "lastError": DRIVE_INDEX_CACHE.get("lastError", ""),
+    }
+
+
+def build_drive_index(access_token: str) -> dict[str, Any]:
     files = list_drive_tree(access_token, DRIVE_FOLDER_ID)
     skipped: list[dict[str, str]] = []
     chunks: list[dict[str, Any]] = []
@@ -678,10 +710,52 @@ def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
         except Exception as exc:
             skipped.append({"name": file["name"], "path": file["path"], "mimeType": file["mimeType"], "reason": str(exc)})
 
+    now = time.time()
+    return {
+        "folderId": DRIVE_FOLDER_ID,
+        "builtAt": now,
+        "expiresAt": now + DRIVE_INDEX_TTL_SECONDS,
+        "files": files,
+        "chunks": chunks,
+        "skipped": skipped,
+        "lastError": "",
+    }
+
+
+def get_drive_index(access_token: str, force_refresh: bool = False) -> dict[str, Any]:
+    if not access_token:
+        raise AppError("Missing Google Drive access. Set GOOGLE_ACCESS_TOKEN or sign in with Google.")
+
+    now = time.time()
+    with DRIVE_INDEX_LOCK:
+        is_current_folder = DRIVE_INDEX_CACHE.get("folderId") == DRIVE_FOLDER_ID
+        has_cache = bool(DRIVE_INDEX_CACHE.get("builtAt"))
+        is_fresh = float(DRIVE_INDEX_CACHE.get("expiresAt") or 0) > now
+        if has_cache and is_current_folder and is_fresh and not force_refresh:
+            return DRIVE_INDEX_CACHE
+
+    try:
+        index = build_drive_index(access_token)
+    except Exception as exc:
+        with DRIVE_INDEX_LOCK:
+            DRIVE_INDEX_CACHE["lastError"] = str(exc)
+        raise
+
+    with DRIVE_INDEX_LOCK:
+        DRIVE_INDEX_CACHE.clear()
+        DRIVE_INDEX_CACHE.update(index)
+        return DRIVE_INDEX_CACHE
+
+
+def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
+    index = get_drive_index(access_token)
+    chunks = list(index.get("chunks") or [])
+    skipped = list(index.get("skipped") or [])
     candidates = rough_rank_chunks(query, chunks)
     ai_judgment = ai_select_context(query, candidates)
     return {
-        "scannedFiles": len(files),
+        "cache": index_status_payload(),
+        "scannedFiles": len(index.get("files") or []),
         "textChunks": len(chunks),
         "skipped": skipped,
         "matches": ai_judgment["selected"],
@@ -795,7 +869,13 @@ class Handler(BaseHTTPRequestHandler):
                 "storesLocalDocuments": False,
                 "topicJudgment": "openai" if OPENAI_API_KEY else "disabled",
                 "supports": ["Google Docs", "txt", "markdown", "pdf", "docx", "rtf", "legacy doc best-effort"],
+                "driveIndex": index_status_payload(),
             })
+            return
+        if parsed.path == "/api/index/status":
+            if not require_app_access(self):
+                return
+            json_response(self, index_status_payload())
             return
         if parsed.path == "/api/auth/google/start":
             start_google_oauth(self)
@@ -814,6 +894,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/auth/google/logout":
             logout_google(self)
+            return
+        if self.path == "/api/index/refresh":
+            try:
+                if not require_app_access(self):
+                    return
+                index = get_drive_index(access_token_from_request(self), force_refresh=True)
+                json_response(self, {
+                    "ok": True,
+                    "scannedFiles": len(index.get("files") or []),
+                    "textChunks": len(index.get("chunks") or []),
+                    "skippedFiles": len(index.get("skipped") or []),
+                    "cache": index_status_payload(),
+                })
+            except Exception as exc:
+                json_response(self, {"error": str(exc), "cache": index_status_payload()}, 500)
             return
         if self.path != "/api/chat":
             self.send_error(404)
@@ -841,6 +936,7 @@ class Handler(BaseHTTPRequestHandler):
                     "scannedFiles": context["scannedFiles"],
                     "textChunks": context["textChunks"],
                     "skippedFiles": len(context["skipped"]),
+                    "cache": context["cache"],
                 },
                 "model": OPENAI_MODEL if OPENAI_API_KEY else "python-drive-live-demo",
             })

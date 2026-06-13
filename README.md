@@ -1,10 +1,10 @@
 # MentorBrind-AI
 
-A private AI mentor prototype built around Brind's notes, quotes, and records. The app does not sync Google Drive documents to local storage and does not commit any private corpus to GitHub. On each chat request, the Python backend reads the configured Google Drive folder live, asks AI to judge the topic semantically, selects relevant snippets, and generates an answer from those snippets.
+A private AI mentor prototype built around Brind's notes, quotes, and records. The app does not sync Google Drive documents to local storage and does not commit any private corpus to GitHub. The Python backend reads the configured Google Drive folder into an in-memory index, asks AI to judge the topic semantically, selects relevant snippets, and generates an answer from those snippets.
 
 ## Current Capabilities
 
-- Reads a configured Google Drive folder at request time.
+- Reads a configured Google Drive folder into a process-memory index with automatic expiry and manual refresh.
 - Stores no Brind source documents, extracted text, local corpus, or knowledge-base snapshot.
 - Supports Google Docs, TXT, Markdown, PDF, DOCX, RTF, and best-effort legacy `.doc` parsing.
 - Uses rough text matching only to narrow candidates, then delegates topic judgment and final source selection to OpenAI.
@@ -21,7 +21,7 @@ This repository is designed to be safe for a private GitHub repo because it only
 - `.env` is not committed.
 - Google Drive files are not committed.
 - No `corpus.jsonl`, local vector database, raw-text cache, or sync report is generated or committed.
-- Retrieved Drive text exists only in memory during the current request.
+- Retrieved Drive text exists only in server memory and expires with the process or cache TTL.
 - OAuth access and refresh tokens are held in server memory only in the current prototype. They are not written to disk.
 - User-facing chat responses do not expose retrieved chunks by default. The model sees sources server-side, but the API returns protected citation labels unless explicitly configured otherwise.
 - `.gitignore` excludes virtual environments, caches, logs, `data/`, and other local artifacts.
@@ -70,7 +70,7 @@ The preview script tries, in order:
 
 Edit `.env` with your local credentials when you want live chat. If you only want to preview the UI, credentials are not required. Chat requests require Google Drive access and, for AI answers, an OpenAI key.
 
-The app automatically loads `.env` from the project root. Real environment variables still take priority over values in `.env`.
+The app automatically loads `.env` from the project root. For local preview, values in `.env` override same-named shell variables so stale terminal settings do not silently win.
 
 ## Manual Run
 
@@ -90,6 +90,7 @@ $env:APP_ACCESS_CODE="<optional-app-access-code>"
 $env:OPENAI_API_KEY="<openai-api-key>"
 $env:OPENAI_MODEL="gpt-5.4-mini"
 $env:MAX_CANDIDATES_FOR_AI="30"
+$env:DRIVE_INDEX_TTL_SECONDS="900"
 
 .\.venv\Scripts\python.exe app.py
 ```
@@ -125,19 +126,23 @@ $env:PORT="4175"
 | `OPENAI_API_KEY` | OpenAI API key for topic judgment and final answers |
 | `OPENAI_MODEL` | Model used for judgment and answer generation |
 | `PORT` | Local server port, default `4173` |
-| `MAX_FILES_PER_QUERY` | Maximum Drive files scanned per request |
+| `MAX_FILES_PER_QUERY` | Maximum Drive files scanned while building the in-memory index |
 | `MAX_CHUNKS_FOR_MODEL` | Maximum snippets passed into the final answer prompt |
 | `MAX_CANDIDATES_FOR_AI` | Candidate snippets passed to AI for semantic judging |
+| `DRIVE_INDEX_TTL_SECONDS` | In-memory Drive index lifetime before automatic rebuild, default 15 minutes |
 
 ## Retrieval Flow
 
-Every chat request reads Drive live:
+The backend keeps a Drive-derived index in process memory:
 
-1. The backend lists files in the configured folder.
+1. The first chat request or manual refresh lists files in the configured folder.
 2. Supported files are exported or parsed in memory.
-3. Rough text matching reduces the candidate snippet set.
-4. OpenAI semantically judges the user's real topic and chooses relevant snippets.
-5. The answer is generated from the AI-selected snippets.
+3. The in-memory index is reused until `DRIVE_INDEX_TTL_SECONDS` expires.
+4. Rough text matching reduces the candidate snippet set.
+5. OpenAI semantically judges the user's real topic and chooses relevant snippets.
+6. The answer is generated from the AI-selected snippets.
+
+Use the sidebar **Refresh** button or `POST /api/index/refresh` to pick up Google Drive changes immediately. Otherwise, updates are picked up automatically after the TTL.
 
 The rough match is only a token-cost reducer. It is not treated as a topic classifier. Topic judgment no longer depends on hard-coded keyword rules, which avoids errors such as classifying a stock question as a medical or psychology topic.
 
@@ -183,7 +188,8 @@ Limitations:
 
 - Images, handwriting, and scanned PDFs need OCR, which is not implemented yet.
 - Legacy `.doc` parsing is unreliable; convert to `.docx` or Google Docs when possible.
-- There is no persistent index yet, so each request scans Drive again. This means Drive updates are naturally reflected, but large folders may be slower.
+- The index is process-memory only. Restarting the server clears it.
+- Google Drive updates are visible after manual refresh or after `DRIVE_INDEX_TTL_SECONDS` expires.
 
 ## API
 
@@ -194,6 +200,14 @@ Returns non-secret runtime diagnostics, including missing configuration, recomme
 ### `GET /api/sources`
 
 Returns service status, including whether Google and OpenAI credentials are configured, whether local document storage is used, and which file types are supported.
+
+### `GET /api/index/status`
+
+Returns non-secret in-memory index status, including whether the index is cached, file/chunk counts, TTL, and last refresh age.
+
+### `POST /api/index/refresh`
+
+Forces a new Google Drive read and rebuilds the process-memory index.
 
 ### `POST /api/chat`
 
@@ -210,7 +224,7 @@ Response includes:
 - `answer`: mentor-style answer
 - `sources`: protected AI-selected citation labels by default. Source metadata and excerpts are hidden unless debug exposure flags are enabled.
 - `aiJudgment`: AI-generated topic, confidence, and reason
-- `stats`: scanned file count, text chunk count, skipped file count
+- `stats`: scanned file count, text chunk count, skipped file count, and index cache status
 - `skipped`: files that could not be read and the reason
 
 ## GitHub Safety Checklist
@@ -238,12 +252,11 @@ The current prototype includes a lightweight in-memory OAuth flow, which is fine
 1. The user signs in with Google.
 2. The server stores the refresh token securely.
 3. The server requests short-lived access tokens as needed.
-4. Each chat request reads Drive live.
+4. The server maintains either an in-memory or secure remote index.
 5. Private notes are never written to GitHub or public logs.
 
 ## Roadmap
 
-- Add full Google OAuth login instead of manual access tokens.
 - Add OCR support for scanned PDFs and images.
 - Add an optional secure remote index for better latency on large Drive folders.
 - Add user access controls so friends can use the app without direct access to raw Drive files.

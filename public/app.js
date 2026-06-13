@@ -12,12 +12,15 @@ const tokenStatus = document.querySelector("#tokenStatus");
 const oauthStatus = document.querySelector("#oauthStatus");
 const openaiStatus = document.querySelector("#openaiStatus");
 const storageStatus = document.querySelector("#storageStatus");
+const indexStatus = document.querySelector("#indexStatus");
+const indexRefreshIn = document.querySelector("#indexRefreshIn");
 const scannedCount = document.querySelector("#scannedCount");
 const chunkCount = document.querySelector("#chunkCount");
 const skippedCount = document.querySelector("#skippedCount");
 const mode = document.querySelector("#mode");
 const connectDrive = document.querySelector("#connectDrive");
 const disconnectDrive = document.querySelector("#disconnectDrive");
+const refreshIndex = document.querySelector("#refreshIndex");
 
 let sourceState = null;
 let accessState = { enabled: false, granted: true };
@@ -69,10 +72,12 @@ function renderSource(source) {
   summary.textContent = `[${source.citation}] ${source.title || source.label || "Protected source"}`;
   card.appendChild(summary);
 
-  const path = document.createElement("div");
-  path.className = "source-path";
-  path.textContent = source.source || "unknown source";
-  card.appendChild(path);
+  if (source.source) {
+    const path = document.createElement("div");
+    path.className = "source-path";
+    path.textContent = source.source;
+    card.appendChild(path);
+  }
 
   if (source.modifiedTime) {
     const modified = document.createElement("div");
@@ -107,6 +112,7 @@ function updateAuthControls(data) {
 
   connectDrive.hidden = data.hasGoogleToken || !data.hasGoogleOAuthConfig;
   disconnectDrive.hidden = !data.hasGoogleToken || data.hasGoogleEnvToken;
+  updateIndexControls(data.driveIndex);
 }
 
 function updateAccessControls(data) {
@@ -119,6 +125,25 @@ function updateHealthControls(data) {
   healthState = data;
   healthStatus.textContent = data.ok ? "Ready" : "Setup needed";
   healthMessage.textContent = data.ok ? "Drive and AI configuration look ready." : (data.actions || []).join(" ");
+  updateIndexControls(data.config?.driveIndex);
+}
+
+function formatDuration(seconds) {
+  if (seconds === null || seconds === undefined) return "-";
+  const value = Math.max(0, Number(seconds) || 0);
+  if (value < 60) return `${value}s`;
+  const minutes = Math.floor(value / 60);
+  const remainder = value % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}
+
+function updateIndexControls(index) {
+  if (!index) return;
+  indexStatus.textContent = index.cached ? "Cached" : "Empty";
+  indexRefreshIn.textContent = index.cached ? formatDuration(index.expiresInSeconds) : "-";
+  scannedCount.textContent = index.scannedFiles ?? "-";
+  chunkCount.textContent = index.textChunks ?? "-";
+  skippedCount.textContent = index.skippedFiles ?? "-";
 }
 
 async function loadAccessStatus() {
@@ -141,6 +166,14 @@ async function loadSources() {
   updateAuthControls(data);
 }
 
+async function loadIndexStatus() {
+  if (accessState.enabled && !accessState.granted) return null;
+  const res = await fetch("/api/index/status");
+  const data = await res.json();
+  if (res.ok) updateIndexControls(data);
+  return data;
+}
+
 unlockApp.addEventListener("click", async () => {
   accessError.textContent = "";
   unlockApp.disabled = true;
@@ -148,7 +181,7 @@ unlockApp.addEventListener("click", async () => {
     const res = await fetch("/api/access/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: accessCodeInput.value })
+      body: JSON.stringify({ code: accessCodeInput.value.trim() })
     });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || "Unlock failed.");
@@ -184,6 +217,27 @@ disconnectDrive.addEventListener("click", async () => {
   await loadHealth();
 });
 
+refreshIndex.addEventListener("click", async () => {
+  if (accessState.enabled && !accessState.granted) {
+    accessCodeInput.focus();
+    return;
+  }
+
+  refreshIndex.disabled = true;
+  try {
+    const res = await fetch("/api/index/refresh", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || "Refresh failed.");
+    updateIndexControls(data.cache);
+    await loadHealth();
+  } catch (error) {
+    healthStatus.textContent = "Setup needed";
+    healthMessage.textContent = error.message;
+  } finally {
+    refreshIndex.disabled = false;
+  }
+});
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = input.value.trim();
@@ -212,9 +266,12 @@ form.addEventListener("submit", async (event) => {
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    scannedCount.textContent = data.stats?.scannedFiles ?? "-";
-    chunkCount.textContent = data.stats?.textChunks ?? "-";
-    skippedCount.textContent = data.stats?.skippedFiles ?? "-";
+    updateIndexControls(data.stats?.cache || {
+      cached: true,
+      scannedFiles: data.stats?.scannedFiles,
+      textChunks: data.stats?.textChunks,
+      skippedFiles: data.stats?.skippedFiles
+    });
     addMessage("assistant", `${data.answer}\n\nModel: ${data.model}`, data.sources, data.skipped, data.aiJudgment);
   } catch (error) {
     addMessage("assistant", `Error: ${error.message}`);
@@ -226,4 +283,5 @@ form.addEventListener("submit", async (event) => {
 
 loadAccessStatus()
   .then(loadSources)
-  .then(loadHealth);
+  .then(loadHealth)
+  .then(loadIndexStatus);
