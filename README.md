@@ -252,7 +252,51 @@ Do not commit:
 - any extracted Brind source text
 - logs or screenshots containing private content
 
-## Deployment Notes
+## Streamlit Community Cloud Deployment
+
+The easiest hosted path is Streamlit Community Cloud. It uses `streamlit_app.py`, which reuses the same Google Drive reading, in-memory index, incremental refresh, source protection, and OpenAI answer logic from `app.py`.
+
+1. Push this repository to GitHub.
+2. In Streamlit Community Cloud, create a new app from the GitHub repo.
+3. Set the main file path to:
+
+```text
+streamlit_app.py
+```
+
+4. In Streamlit app settings, add secrets in TOML format:
+
+```toml
+APP_BASE_URL = "https://your-streamlit-app.streamlit.app"
+GOOGLE_DRIVE_FOLDER_ID = "1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC"
+GOOGLE_CLIENT_ID = "<google-oauth-client-id>"
+GOOGLE_CLIENT_SECRET = "<google-oauth-client-secret>"
+GOOGLE_REDIRECT_URI = "https://your-streamlit-app.streamlit.app"
+APP_ACCESS_CODE = "<private-app-passcode>"
+OPENAI_API_KEY = "<openai-api-key>"
+OPENAI_MODEL = "gpt-5.4-mini"
+OPENAI_TIMEOUT_SECONDS = "45"
+AI_RETRIEVAL_MODE = "fast"
+DRIVE_INDEX_TTL_SECONDS = "900"
+MAX_FILES_PER_QUERY = "160"
+MAX_CHUNKS_FOR_MODEL = "8"
+MAX_CANDIDATES_FOR_AI = "30"
+EXPOSE_SOURCE_METADATA = "false"
+EXPOSE_SOURCE_EXCERPTS = "false"
+```
+
+5. In Google Cloud Console, add this OAuth authorized redirect URI:
+
+```text
+https://your-streamlit-app.streamlit.app
+```
+
+6. If the OAuth app is still in Testing mode, add every Google account that needs access as a test user.
+7. Deploy the app, open the Streamlit URL, enter the app access code, then click **Connect Google Drive**.
+
+Streamlit Community Cloud stores secrets outside the repo. Do not commit `.env`, source documents, extracted text, screenshots with private notes, or logs containing private content.
+
+## Other Deployment Notes
 
 The app can be deployed as a single Python web service. It uses the platform-provided `PORT` and should bind to `HOST=0.0.0.0` in production.
 
