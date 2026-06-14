@@ -917,21 +917,37 @@ class Handler(BaseHTTPRequestHandler):
             if not require_app_access(self):
                 return
             access_token = access_token_from_request(self)
+            if not access_token:
+                json_response(self, {"error": "Google Drive is not connected in this browser session. Click Connect Google Drive again."}, 401)
+                return
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length).decode("utf-8")
-            message = json.loads(body or "{}").get("message", "")
+            message = str(json.loads(body or "{}").get("message", "")).strip()
+            if not message:
+                json_response(self, {"error": "Message is required."}, 400)
+                return
             context = collect_drive_context(access_token, message)
-            answer = openai_answer(message, context["matches"], context["aiJudgment"]) or fallback_answer(
-                message,
-                context["matches"],
-                context["skipped"],
-                context["aiJudgment"],
-            )
+            answer_error = ""
+            try:
+                answer = openai_answer(message, context["matches"], context["aiJudgment"])
+            except Exception as exc:
+                answer_error = str(exc)
+                answer = None
+            if not answer:
+                answer = fallback_answer(
+                    message,
+                    context["matches"],
+                    context["skipped"],
+                    context["aiJudgment"],
+                )
+                if answer_error:
+                    answer = f"{answer}\n\nAnswer generation error: {answer_error}"
             json_response(self, {
                 "answer": answer,
                 "sources": context["sources"],
                 "skipped": context["skipped"][:20],
                 "aiJudgment": context["aiJudgment"],
+                "answerError": answer_error,
                 "stats": {
                     "scannedFiles": context["scannedFiles"],
                     "textChunks": context["textChunks"],
@@ -941,7 +957,7 @@ class Handler(BaseHTTPRequestHandler):
                 "model": OPENAI_MODEL if OPENAI_API_KEY else "python-drive-live-demo",
             })
         except Exception as exc:
-            json_response(self, {"error": str(exc)}, 500)
+            json_response(self, {"error": str(exc), "cache": index_status_payload()}, 500)
 
     def log_message(self, format: str, *args: Any) -> None:
         return

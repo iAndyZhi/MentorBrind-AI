@@ -103,6 +103,22 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;");
 }
 
+async function readJsonResponse(res, fallbackMessage) {
+  const text = await res.text();
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`${fallbackMessage}: HTTP ${res.status}. ${text.slice(0, 180)}`);
+    }
+  }
+  if (!res.ok || data.error) {
+    throw new Error(data.error || `${fallbackMessage}: HTTP ${res.status}`);
+  }
+  return data;
+}
+
 function updateAuthControls(data) {
   sourceState = data;
   tokenStatus.textContent = data.hasGoogleToken ? "Connected" : "Not connected";
@@ -148,29 +164,29 @@ function updateIndexControls(index) {
 
 async function loadAccessStatus() {
   const res = await fetch("/api/access/status");
-  const data = await res.json();
+  const data = await readJsonResponse(res, "Access status failed");
   updateAccessControls(data);
   return data;
 }
 
 async function loadHealth() {
   const res = await fetch("/api/health");
-  const data = await res.json();
+  const data = await readJsonResponse(res, "Health check failed");
   updateHealthControls(data);
   return data;
 }
 
 async function loadSources() {
   const res = await fetch("/api/sources");
-  const data = await res.json();
+  const data = await readJsonResponse(res, "Source status failed");
   updateAuthControls(data);
 }
 
 async function loadIndexStatus() {
   if (accessState.enabled && !accessState.granted) return null;
   const res = await fetch("/api/index/status");
-  const data = await res.json();
-  if (res.ok) updateIndexControls(data);
+  const data = await readJsonResponse(res, "Index status failed");
+  updateIndexControls(data);
   return data;
 }
 
@@ -183,8 +199,7 @@ unlockApp.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: accessCodeInput.value.trim() })
     });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || "Unlock failed.");
+    const data = await readJsonResponse(res, "Unlock failed");
     accessCodeInput.value = "";
     await loadAccessStatus();
     await loadSources();
@@ -226,8 +241,7 @@ refreshIndex.addEventListener("click", async () => {
   refreshIndex.disabled = true;
   try {
     const res = await fetch("/api/index/refresh", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || "Refresh failed.");
+    const data = await readJsonResponse(res, "Refresh failed");
     updateIndexControls(data.cache);
     await loadHealth();
   } catch (error) {
@@ -257,6 +271,7 @@ form.addEventListener("submit", async (event) => {
   input.value = "";
   form.querySelector("button").disabled = true;
   addMessage("user", text);
+  addMessage("assistant", "Working on it. I am checking the in-memory Drive index, selecting sources, and asking the model.");
 
   try {
     const res = await fetch("/api/chat", {
@@ -264,8 +279,7 @@ form.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: `[${mode.value}] ${text}` })
     });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
+    const data = await readJsonResponse(res, "Chat failed");
     updateIndexControls(data.stats?.cache || {
       cached: true,
       scannedFiles: data.stats?.scannedFiles,
