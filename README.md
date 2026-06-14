@@ -266,6 +266,7 @@ The app can be deployed as a single Python web service. It uses the platform-pro
 Build Command: pip install -r requirements.txt
 Start Command: python app.py
 Health Check Path: /api/health
+Instance Type: Free
 ```
 
 4. Set these environment variables in Render:
