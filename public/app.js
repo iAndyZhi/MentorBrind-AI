@@ -25,6 +25,7 @@ const refreshIndex = document.querySelector("#refreshIndex");
 let sourceState = null;
 let accessState = { enabled: false, granted: true };
 let healthState = null;
+const CHAT_TIMEOUT_MS = 75000;
 
 function addMessage(role, text, sources = [], skipped = [], aiJudgment = null) {
   const node = document.createElement("div");
@@ -273,11 +274,14 @@ form.addEventListener("submit", async (event) => {
   addMessage("user", text);
   addMessage("assistant", "Working on it. I am checking the in-memory Drive index, selecting sources, and asking the model.");
 
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: `[${mode.value}] ${text}` })
+      body: JSON.stringify({ message: `[${mode.value}] ${text}` }),
+      signal: controller.signal
     });
     const data = await readJsonResponse(res, "Chat failed");
     updateIndexControls(data.stats?.cache || {
@@ -288,8 +292,12 @@ form.addEventListener("submit", async (event) => {
     });
     addMessage("assistant", `${data.answer}\n\nModel: ${data.model}`, data.sources, data.skipped, data.aiJudgment);
   } catch (error) {
-    addMessage("assistant", `Error: ${error.message}`);
+    const message = error.name === "AbortError"
+      ? "Chat timed out after 75 seconds. The backend may still be waiting on Google Drive or OpenAI. Try Refresh, then send again."
+      : `Error: ${error.message}`;
+    addMessage("assistant", message);
   } finally {
+    window.clearTimeout(timeoutId);
     form.querySelector("button").disabled = false;
     input.focus();
   }

@@ -6,6 +6,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import threading
 import time
 import urllib.error
@@ -55,6 +56,7 @@ MAX_FILES_PER_QUERY = int(os.getenv("MAX_FILES_PER_QUERY", "160"))
 MAX_CHUNKS_FOR_MODEL = int(os.getenv("MAX_CHUNKS_FOR_MODEL", "8"))
 MAX_CANDIDATES_FOR_AI = int(os.getenv("MAX_CANDIDATES_FOR_AI", "30"))
 DRIVE_INDEX_TTL_SECONDS = int(os.getenv("DRIVE_INDEX_TTL_SECONDS", "900"))
+OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "45"))
 
 MIME_FOLDER = "application/vnd.google-apps.folder"
 MIME_DOC = "application/vnd.google-apps.document"
@@ -218,6 +220,8 @@ def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
             "hasGoogleEnvToken": bool(GOOGLE_ACCESS_TOKEN),
             "hasGoogleOAuthConfig": has_oauth_config,
             "hasOpenAIKey": bool(OPENAI_API_KEY),
+            "openaiModel": OPENAI_MODEL,
+            "openaiTimeoutSeconds": OPENAI_TIMEOUT_SECONDS,
             "appAccessCodeEnabled": bool(APP_ACCESS_CODE),
             "accessCodeLength": len(APP_ACCESS_CODE),
             "exposesSourceMetadata": EXPOSE_SOURCE_METADATA,
@@ -321,11 +325,13 @@ def openai_request(input_text: str) -> str:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(request, timeout=OPENAI_TIMEOUT_SECONDS) as response:
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise AppError(f"OpenAI API {exc.code}: {detail}") from exc
+    except (TimeoutError, socket.timeout, urllib.error.URLError) as exc:
+        raise AppError(f"OpenAI API timed out after {OPENAI_TIMEOUT_SECONDS} seconds.") from exc
 
     if data.get("output_text"):
         return data["output_text"]

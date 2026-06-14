@@ -89,6 +89,7 @@ $env:SESSION_MAX_AGE_SECONDS="2592000"
 $env:APP_ACCESS_CODE="<optional-app-access-code>"
 $env:OPENAI_API_KEY="<openai-api-key>"
 $env:OPENAI_MODEL="gpt-5.4-mini"
+$env:OPENAI_TIMEOUT_SECONDS="45"
 $env:MAX_CANDIDATES_FOR_AI="30"
 $env:DRIVE_INDEX_TTL_SECONDS="900"
 
@@ -125,6 +126,7 @@ $env:PORT="4175"
 | `EXPOSE_SOURCE_EXCERPTS` | Optional debug flag. Default `false`; when true, snippet excerpts can be returned to the UI. Do not enable for users who should not see source data. |
 | `OPENAI_API_KEY` | OpenAI API key for topic judgment and final answers |
 | `OPENAI_MODEL` | Model used for judgment and answer generation |
+| `OPENAI_TIMEOUT_SECONDS` | Maximum wait for each OpenAI request before falling back, default 45 seconds |
 | `PORT` | Local server port, default `4173` |
 | `MAX_FILES_PER_QUERY` | Maximum Drive files scanned while building the in-memory index |
 | `MAX_CHUNKS_FOR_MODEL` | Maximum snippets passed into the final answer prompt |
