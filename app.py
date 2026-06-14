@@ -83,6 +83,8 @@ DRIVE_INDEX_CACHE: dict[str, Any] = {
     "files": [],
     "chunks": [],
     "skipped": [],
+    "records": {},
+    "refreshStats": {},
     "lastError": "",
 }
 
@@ -711,24 +713,74 @@ def index_status_payload() -> dict[str, Any]:
         "scannedFiles": len(DRIVE_INDEX_CACHE.get("files") or []),
         "textChunks": len(DRIVE_INDEX_CACHE.get("chunks") or []),
         "skippedFiles": len(DRIVE_INDEX_CACHE.get("skipped") or []),
+        "refreshStats": DRIVE_INDEX_CACHE.get("refreshStats") or {},
         "lastError": DRIVE_INDEX_CACHE.get("lastError", ""),
     }
 
 
-def build_drive_index(access_token: str) -> dict[str, Any]:
+def file_signature(file: dict[str, Any]) -> str:
+    return "|".join([
+        file.get("id", ""),
+        file.get("name", ""),
+        file.get("mimeType", ""),
+        file.get("modifiedTime", ""),
+        str(file.get("size", "")),
+    ])
+
+
+def build_file_record(access_token: str, file: dict[str, Any]) -> dict[str, Any]:
+    record = {
+        "signature": file_signature(file),
+        "file": file,
+        "chunks": [],
+        "skipped": [],
+    }
+    try:
+        text = export_file_text(access_token, file)
+        if not text:
+            record["skipped"] = [{"name": file["name"], "path": file["path"], "mimeType": file["mimeType"], "reason": "Unsupported live export type"}]
+            return record
+        record["chunks"] = split_into_chunks(file, text)
+    except Exception as exc:
+        record["skipped"] = [{"name": file["name"], "path": file["path"], "mimeType": file["mimeType"], "reason": str(exc)}]
+    return record
+
+
+def build_drive_index(access_token: str, previous_index: dict[str, Any] | None = None) -> dict[str, Any]:
     files = list_drive_tree(access_token, DRIVE_FOLDER_ID)
     skipped: list[dict[str, str]] = []
     chunks: list[dict[str, Any]] = []
+    records: dict[str, dict[str, Any]] = {}
+    previous_records = (previous_index or {}).get("records") or {}
+    stats = {
+        "listedFiles": len(files),
+        "reusedFiles": 0,
+        "readFiles": 0,
+        "changedFiles": 0,
+        "unsupportedOrFailedFiles": 0,
+        "removedFiles": 0,
+    }
 
     for file in files:
-        try:
-            text = export_file_text(access_token, file)
-            if not text:
-                skipped.append({"name": file["name"], "path": file["path"], "mimeType": file["mimeType"], "reason": "Unsupported live export type"})
-                continue
-            chunks.extend(split_into_chunks(file, text))
-        except Exception as exc:
-            skipped.append({"name": file["name"], "path": file["path"], "mimeType": file["mimeType"], "reason": str(exc)})
+        signature = file_signature(file)
+        previous_record = previous_records.get(file["id"])
+        if previous_record and previous_record.get("signature") == signature:
+            record = previous_record
+            stats["reusedFiles"] += 1
+        else:
+            record = build_file_record(access_token, file)
+            stats["readFiles"] += 1
+            if previous_record:
+                stats["changedFiles"] += 1
+        if record.get("skipped"):
+            stats["unsupportedOrFailedFiles"] += 1
+        records[file["id"]] = record
+        chunks.extend(record.get("chunks") or [])
+        skipped.extend(record.get("skipped") or [])
+
+    previous_ids = set(previous_records.keys())
+    current_ids = {file["id"] for file in files}
+    stats["removedFiles"] = len(previous_ids - current_ids)
 
     now = time.time()
     return {
@@ -738,6 +790,8 @@ def build_drive_index(access_token: str) -> dict[str, Any]:
         "files": files,
         "chunks": chunks,
         "skipped": skipped,
+        "records": records,
+        "refreshStats": stats,
         "lastError": "",
     }
 
@@ -753,9 +807,10 @@ def get_drive_index(access_token: str, force_refresh: bool = False) -> dict[str,
         is_fresh = float(DRIVE_INDEX_CACHE.get("expiresAt") or 0) > now
         if has_cache and is_current_folder and is_fresh and not force_refresh:
             return DRIVE_INDEX_CACHE
+        previous_index = dict(DRIVE_INDEX_CACHE) if is_current_folder else None
 
     try:
-        index = build_drive_index(access_token)
+        index = build_drive_index(access_token, previous_index)
     except Exception as exc:
         with DRIVE_INDEX_LOCK:
             DRIVE_INDEX_CACHE["lastError"] = str(exc)

@@ -4,7 +4,7 @@ A private AI mentor prototype built around Brind's notes, quotes, and records. T
 
 ## Current Capabilities
 
-- Reads a configured Google Drive folder into a process-memory index with automatic expiry and manual refresh.
+- Reads a configured Google Drive folder into a process-memory index with automatic expiry, manual refresh, and incremental reuse of unchanged files.
 - Stores no Brind source documents, extracted text, local corpus, or knowledge-base snapshot.
 - Supports Google Docs, TXT, Markdown, PDF, DOCX, RTF, and best-effort legacy `.doc` parsing.
 - Uses rough text matching only to narrow candidates, then delegates topic judgment and final source selection to OpenAI.
@@ -142,11 +142,12 @@ The backend keeps a Drive-derived index in process memory:
 1. The first chat request or manual refresh lists files in the configured folder.
 2. Supported files are exported or parsed in memory.
 3. The in-memory index is reused until `DRIVE_INDEX_TTL_SECONDS` expires.
-4. Rough text matching reduces the candidate snippet set.
-5. In `fast` mode, the top candidates go directly into the final answer prompt. In `ai` mode, OpenAI first semantically judges and narrows candidates.
-6. The answer is generated from the selected snippets.
+4. On refresh or TTL expiry, Drive is listed again, but unchanged files reuse their existing in-memory chunks.
+5. Rough text matching reduces the candidate snippet set.
+6. In `fast` mode, the top candidates go directly into the final answer prompt. In `ai` mode, OpenAI first semantically judges and narrows candidates.
+7. The answer is generated from the selected snippets.
 
-Use the sidebar **Refresh** button or `POST /api/index/refresh` to pick up Google Drive changes immediately. Otherwise, updates are picked up automatically after the TTL.
+Use the sidebar **Refresh** button or `POST /api/index/refresh` to pick up Google Drive changes immediately. Otherwise, updates are picked up automatically after the TTL. The sidebar shows how many files were read, reused, changed, removed, or skipped during the latest index rebuild.
 
 The rough match is only a latency and token-cost reducer. It is not treated as a topic classifier. In `fast` mode the app avoids a separate topic label and lets the final model reason over selected context. In `ai` mode, topic judgment is semantic and no longer depends on hard-coded keyword rules.
 
@@ -207,11 +208,11 @@ Returns service status, including whether Google and OpenAI credentials are conf
 
 ### `GET /api/index/status`
 
-Returns non-secret in-memory index status, including whether the index is cached, file/chunk counts, TTL, and last refresh age.
+Returns non-secret in-memory index status, including whether the index is cached, file/chunk counts, TTL, last refresh age, and incremental refresh stats.
 
 ### `POST /api/index/refresh`
 
-Forces a new Google Drive read and rebuilds the process-memory index.
+Forces a new Google Drive listing and incrementally rebuilds the process-memory index. Unchanged files reuse existing in-memory chunks.
 
 ### `POST /api/chat`
 

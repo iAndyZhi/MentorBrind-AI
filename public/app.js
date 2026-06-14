@@ -14,6 +14,7 @@ const openaiStatus = document.querySelector("#openaiStatus");
 const storageStatus = document.querySelector("#storageStatus");
 const indexStatus = document.querySelector("#indexStatus");
 const indexRefreshIn = document.querySelector("#indexRefreshIn");
+const indexDelta = document.querySelector("#indexDelta");
 const scannedCount = document.querySelector("#scannedCount");
 const chunkCount = document.querySelector("#chunkCount");
 const skippedCount = document.querySelector("#skippedCount");
@@ -166,10 +167,21 @@ function renderTiming(timings) {
   return `Timing: total ${formatMs(timings.totalMs)}; index ${formatMs(timings.indexMs)}; rank ${formatMs(timings.rankMs)}; judge ${formatMs(timings.judgeMs)}; answer ${formatMs(timings.answerMs)}`;
 }
 
+function renderIndexDelta(stats) {
+  if (!stats || Object.keys(stats).length === 0) return "-";
+  const read = stats.readFiles ?? 0;
+  const reused = stats.reusedFiles ?? 0;
+  const changed = stats.changedFiles ?? 0;
+  const removed = stats.removedFiles ?? 0;
+  const failed = stats.unsupportedOrFailedFiles ?? 0;
+  return `read ${read} / reused ${reused} / changed ${changed} / removed ${removed} / skipped ${failed}`;
+}
+
 function updateIndexControls(index) {
   if (!index) return;
   indexStatus.textContent = index.cached ? "Cached" : "Empty";
   indexRefreshIn.textContent = index.cached ? formatDuration(index.expiresInSeconds) : "-";
+  indexDelta.textContent = renderIndexDelta(index.refreshStats);
   scannedCount.textContent = index.scannedFiles ?? "-";
   chunkCount.textContent = index.textChunks ?? "-";
   skippedCount.textContent = index.skippedFiles ?? "-";
