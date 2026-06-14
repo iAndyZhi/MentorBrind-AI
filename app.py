@@ -40,6 +40,7 @@ def load_dotenv(path: Path) -> None:
 
 load_dotenv(ROOT / ".env")
 
+HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "4173"))
 APP_BASE_URL = os.getenv("APP_BASE_URL", f"http://localhost:{PORT}")
 DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC")
@@ -58,6 +59,7 @@ MAX_CANDIDATES_FOR_AI = int(os.getenv("MAX_CANDIDATES_FOR_AI", "30"))
 DRIVE_INDEX_TTL_SECONDS = int(os.getenv("DRIVE_INDEX_TTL_SECONDS", "900"))
 OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "45"))
 AI_RETRIEVAL_MODE = os.getenv("AI_RETRIEVAL_MODE", "fast").strip().lower()
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "").lower() in {"1", "true", "yes"}
 
 MIME_FOLDER = "application/vnd.google-apps.folder"
 MIME_DOC = "application/vnd.google-apps.document"
@@ -127,6 +129,8 @@ def make_cookie(name: str, value: str, max_age: int) -> str:
     cookie[name]["max-age"] = str(max_age)
     cookie[name]["httponly"] = True
     cookie[name]["samesite"] = "Lax"
+    if COOKIE_SECURE:
+        cookie[name]["secure"] = True
     return cookie.output(header="").strip()
 
 
@@ -218,6 +222,8 @@ def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
         "missing": missing,
         "actions": actions,
         "config": {
+            "host": HOST,
+            "port": PORT,
             "folderId": DRIVE_FOLDER_ID,
             "hasGoogleAccess": has_google_access,
             "hasGoogleEnvToken": bool(GOOGLE_ACCESS_TOKEN),
@@ -226,6 +232,7 @@ def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
             "openaiModel": OPENAI_MODEL,
             "openaiTimeoutSeconds": OPENAI_TIMEOUT_SECONDS,
             "aiRetrievalMode": AI_RETRIEVAL_MODE,
+            "cookieSecure": COOKIE_SECURE,
             "appAccessCodeEnabled": bool(APP_ACCESS_CODE),
             "accessCodeLength": len(APP_ACCESS_CODE),
             "exposesSourceMetadata": EXPOSE_SOURCE_METADATA,
@@ -1063,5 +1070,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"Brind Mentor Python backend running at http://localhost:{PORT}")
-    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    print(f"Brind Mentor Python backend running at http://{HOST}:{PORT}")
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

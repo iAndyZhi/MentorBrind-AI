@@ -129,6 +129,8 @@ $env:PORT="4175"
 | `OPENAI_MODEL` | Model used for judgment and answer generation |
 | `OPENAI_TIMEOUT_SECONDS` | Maximum wait for each OpenAI request before falling back, default 45 seconds |
 | `AI_RETRIEVAL_MODE` | `fast` skips the separate AI retrieval judge for lower latency; `ai` adds a semantic judge call before final answering |
+| `COOKIE_SECURE` | Set `true` on HTTPS deployments so session cookies use the Secure flag. Keep `false` for local HTTP preview. |
+| `HOST` | Bind host. Use `127.0.0.1` locally and `0.0.0.0` on hosted platforms. |
 | `PORT` | Local server port, default `4173` |
 | `MAX_FILES_PER_QUERY` | Maximum Drive files scanned while building the in-memory index |
 | `MAX_CHUNKS_FOR_MODEL` | Maximum snippets passed into the final answer prompt |
@@ -252,7 +254,50 @@ Do not commit:
 
 ## Deployment Notes
 
-The current prototype includes a lightweight in-memory OAuth flow, which is fine for local development. For a hosted app, move token storage to a secure secret store or encrypted database:
+The app can be deployed as a single Python web service. It uses the platform-provided `PORT` and should bind to `HOST=0.0.0.0` in production.
+
+### Render Quick Start
+
+1. Push this repository to GitHub.
+2. In Render, create a new **Web Service** from the GitHub repo, or use the included `render.yaml` as a blueprint.
+3. Use:
+
+```text
+Build Command: pip install -r requirements.txt
+Start Command: python app.py
+Health Check Path: /api/health
+```
+
+4. Set these environment variables in Render:
+
+```text
+HOST=0.0.0.0
+APP_BASE_URL=https://your-render-service.onrender.com
+GOOGLE_DRIVE_FOLDER_ID=1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC
+GOOGLE_CLIENT_ID=<google-oauth-client-id>
+GOOGLE_CLIENT_SECRET=<google-oauth-client-secret>
+GOOGLE_REDIRECT_URI=https://your-render-service.onrender.com/api/auth/google/callback
+APP_ACCESS_CODE=<private-app-passcode>
+COOKIE_SECURE=true
+OPENAI_API_KEY=<openai-api-key>
+OPENAI_MODEL=gpt-5.4-mini
+OPENAI_TIMEOUT_SECONDS=45
+AI_RETRIEVAL_MODE=fast
+DRIVE_INDEX_TTL_SECONDS=900
+```
+
+5. In Google Cloud Console, add this OAuth authorized redirect URI:
+
+```text
+https://your-render-service.onrender.com/api/auth/google/callback
+```
+
+6. If the OAuth app is still in Testing mode, add every Google account that needs access as a test user.
+7. Deploy, open the Render URL, enter the app access code, then click **Connect Google Drive**.
+
+### Production Gaps
+
+The current hosted prototype still keeps OAuth sessions and the Drive index in process memory. That is acceptable for a private test deployment, but a production version should move token storage to a secure secret store or encrypted database:
 
 1. The user signs in with Google.
 2. The server stores the refresh token securely.

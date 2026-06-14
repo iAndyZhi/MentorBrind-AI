@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: mentorbrind-ai
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: HOST
+        value: "0.0.0.0"
+      - key: APP_BASE_URL
+        sync: false
+      - key: GOOGLE_DRIVE_FOLDER_ID
+        value: "1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC"
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: "gpt-5.4-mini"
+      - key: OPENAI_TIMEOUT_SECONDS
+        value: "45"
+      - key: AI_RETRIEVAL_MODE
+        value: "fast"
+      - key: APP_ACCESS_CODE
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: DRIVE_INDEX_TTL_SECONDS
+        value: "900"
+      - key: MAX_FILES_PER_QUERY
+        value: "160"
+      - key: MAX_CHUNKS_FOR_MODEL
+        value: "8"
+      - key: MAX_CANDIDATES_FOR_AI
+        value: "30"
+      - key: SESSION_MAX_AGE_SECONDS
+        value: "2592000"
+      - key: EXPOSE_SOURCE_METADATA
+        value: "false"
+      - key: EXPOSE_SOURCE_EXCERPTS
+        value: "false"
