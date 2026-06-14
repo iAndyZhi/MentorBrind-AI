@@ -90,6 +90,7 @@ $env:APP_ACCESS_CODE="<optional-app-access-code>"
 $env:OPENAI_API_KEY="<openai-api-key>"
 $env:OPENAI_MODEL="gpt-5.4-mini"
 $env:OPENAI_TIMEOUT_SECONDS="45"
+$env:AI_RETRIEVAL_MODE="fast"
 $env:MAX_CANDIDATES_FOR_AI="30"
 $env:DRIVE_INDEX_TTL_SECONDS="900"
 
@@ -127,6 +128,7 @@ $env:PORT="4175"
 | `OPENAI_API_KEY` | OpenAI API key for topic judgment and final answers |
 | `OPENAI_MODEL` | Model used for judgment and answer generation |
 | `OPENAI_TIMEOUT_SECONDS` | Maximum wait for each OpenAI request before falling back, default 45 seconds |
+| `AI_RETRIEVAL_MODE` | `fast` skips the separate AI retrieval judge for lower latency; `ai` adds a semantic judge call before final answering |
 | `PORT` | Local server port, default `4173` |
 | `MAX_FILES_PER_QUERY` | Maximum Drive files scanned while building the in-memory index |
 | `MAX_CHUNKS_FOR_MODEL` | Maximum snippets passed into the final answer prompt |
@@ -141,12 +143,12 @@ The backend keeps a Drive-derived index in process memory:
 2. Supported files are exported or parsed in memory.
 3. The in-memory index is reused until `DRIVE_INDEX_TTL_SECONDS` expires.
 4. Rough text matching reduces the candidate snippet set.
-5. OpenAI semantically judges the user's real topic and chooses relevant snippets.
-6. The answer is generated from the AI-selected snippets.
+5. In `fast` mode, the top candidates go directly into the final answer prompt. In `ai` mode, OpenAI first semantically judges and narrows candidates.
+6. The answer is generated from the selected snippets.
 
 Use the sidebar **Refresh** button or `POST /api/index/refresh` to pick up Google Drive changes immediately. Otherwise, updates are picked up automatically after the TTL.
 
-The rough match is only a token-cost reducer. It is not treated as a topic classifier. Topic judgment no longer depends on hard-coded keyword rules, which avoids errors such as classifying a stock question as a medical or psychology topic.
+The rough match is only a latency and token-cost reducer. It is not treated as a topic classifier. In `fast` mode the app avoids a separate topic label and lets the final model reason over selected context. In `ai` mode, topic judgment is semantic and no longer depends on hard-coded keyword rules.
 
 If `OPENAI_API_KEY` is not configured, the app clearly reports that AI topic judgment is disabled instead of inventing a topic label.
 

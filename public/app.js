@@ -154,6 +154,18 @@ function formatDuration(seconds) {
   return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
+function formatMs(ms) {
+  if (ms === null || ms === undefined) return "-";
+  const value = Number(ms) || 0;
+  if (value < 1000) return `${value}ms`;
+  return `${(value / 1000).toFixed(1)}s`;
+}
+
+function renderTiming(timings) {
+  if (!timings) return "";
+  return `Timing: total ${formatMs(timings.totalMs)}; index ${formatMs(timings.indexMs)}; rank ${formatMs(timings.rankMs)}; judge ${formatMs(timings.judgeMs)}; answer ${formatMs(timings.answerMs)}`;
+}
+
 function updateIndexControls(index) {
   if (!index) return;
   indexStatus.textContent = index.cached ? "Cached" : "Empty";
@@ -290,7 +302,9 @@ form.addEventListener("submit", async (event) => {
       textChunks: data.stats?.textChunks,
       skippedFiles: data.stats?.skippedFiles
     });
-    addMessage("assistant", `${data.answer}\n\nModel: ${data.model}`, data.sources, data.skipped, data.aiJudgment);
+    const timingLine = renderTiming(data.stats?.timings);
+    const footer = timingLine ? `Model: ${data.model}\n${timingLine}` : `Model: ${data.model}`;
+    addMessage("assistant", `${data.answer}\n\n${footer}`, data.sources, data.skipped, data.aiJudgment);
   } catch (error) {
     const message = error.name === "AbortError"
       ? "Chat timed out after 75 seconds. The backend may still be waiting on Google Drive or OpenAI. Try Refresh, then send again."

@@ -57,6 +57,7 @@ MAX_CHUNKS_FOR_MODEL = int(os.getenv("MAX_CHUNKS_FOR_MODEL", "8"))
 MAX_CANDIDATES_FOR_AI = int(os.getenv("MAX_CANDIDATES_FOR_AI", "30"))
 DRIVE_INDEX_TTL_SECONDS = int(os.getenv("DRIVE_INDEX_TTL_SECONDS", "900"))
 OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "45"))
+AI_RETRIEVAL_MODE = os.getenv("AI_RETRIEVAL_MODE", "fast").strip().lower()
 
 MIME_FOLDER = "application/vnd.google-apps.folder"
 MIME_DOC = "application/vnd.google-apps.document"
@@ -222,6 +223,7 @@ def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
             "hasOpenAIKey": bool(OPENAI_API_KEY),
             "openaiModel": OPENAI_MODEL,
             "openaiTimeoutSeconds": OPENAI_TIMEOUT_SECONDS,
+            "aiRetrievalMode": AI_RETRIEVAL_MODE,
             "appAccessCodeEnabled": bool(APP_ACCESS_CODE),
             "accessCodeLength": len(APP_ACCESS_CODE),
             "exposesSourceMetadata": EXPOSE_SOURCE_METADATA,
@@ -662,6 +664,18 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
     }
 
 
+def fast_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    selected = candidates[:MAX_CHUNKS_FOR_MODEL]
+    for item in selected:
+        item["aiTopic"] = "Fast retrieval mode"
+    return {
+        "topic": "Fast retrieval mode",
+        "confidence": "medium" if selected else "low",
+        "selected": selected,
+        "reason": "Skipped the separate AI retrieval judge to reduce latency. The final model still evaluates the selected context before answering.",
+    }
+
+
 def public_sources(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
     sources: list[dict[str, Any]] = []
     for index, item in enumerate(matches):
@@ -754,13 +768,26 @@ def get_drive_index(access_token: str, force_refresh: bool = False) -> dict[str,
 
 
 def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
+    timings: dict[str, int] = {}
+    started_at = time.perf_counter()
     index = get_drive_index(access_token)
+    timings["indexMs"] = int((time.perf_counter() - started_at) * 1000)
+
+    rank_started_at = time.perf_counter()
     chunks = list(index.get("chunks") or [])
     skipped = list(index.get("skipped") or [])
     candidates = rough_rank_chunks(query, chunks)
-    ai_judgment = ai_select_context(query, candidates)
+    timings["rankMs"] = int((time.perf_counter() - rank_started_at) * 1000)
+
+    judge_started_at = time.perf_counter()
+    if AI_RETRIEVAL_MODE == "ai":
+        ai_judgment = ai_select_context(query, candidates)
+    else:
+        ai_judgment = fast_select_context(query, candidates)
+    timings["judgeMs"] = int((time.perf_counter() - judge_started_at) * 1000)
     return {
         "cache": index_status_payload(),
+        "timings": timings,
         "scannedFiles": len(index.get("files") or []),
         "textChunks": len(chunks),
         "skipped": skipped,
@@ -817,8 +844,10 @@ def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: 
         "3. For stock, finance, or medical questions, provide educational analysis only. Do not give deterministic buy/sell, diagnosis, or medication instructions.",
         "4. Cite source numbers in the answer, using forms like [1] or [2].",
         "5. Do not reveal raw source passages or long quotes. Synthesize the answer from the sources instead.",
+        "6. If the user asks for raw notes, full documents, exact transcripts, hidden file names, Drive paths, or bulk extraction, refuse that part and offer a concise synthesized summary instead.",
         "",
-        f"AI judged topic: {ai_judgment.get('topic', 'Not judged')}",
+        f"Retrieval mode/topic signal: {ai_judgment.get('topic', 'Not judged')}",
+        f"Retrieval note: {ai_judgment.get('reason', '')}",
         f"User question: {query}",
         "",
         "Live Google Drive sources selected by AI:",
@@ -873,7 +902,7 @@ class Handler(BaseHTTPRequestHandler):
                 "hasGoogleOAuthConfig": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
                 "hasOpenAIKey": bool(OPENAI_API_KEY),
                 "storesLocalDocuments": False,
-                "topicJudgment": "openai" if OPENAI_API_KEY else "disabled",
+                "topicJudgment": AI_RETRIEVAL_MODE if OPENAI_API_KEY else "disabled",
                 "supports": ["Google Docs", "txt", "markdown", "pdf", "docx", "rtf", "legacy doc best-effort"],
                 "driveIndex": index_status_payload(),
             })
@@ -919,6 +948,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/api/chat":
             self.send_error(404)
             return
+        request_started_at = time.perf_counter()
         try:
             if not require_app_access(self):
                 return
@@ -934,11 +964,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
             context = collect_drive_context(access_token, message)
             answer_error = ""
+            answer_started_at = time.perf_counter()
             try:
                 answer = openai_answer(message, context["matches"], context["aiJudgment"])
             except Exception as exc:
                 answer_error = str(exc)
                 answer = None
+            answer_ms = int((time.perf_counter() - answer_started_at) * 1000)
             if not answer:
                 answer = fallback_answer(
                     message,
@@ -948,6 +980,11 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 if answer_error:
                     answer = f"{answer}\n\nAnswer generation error: {answer_error}"
+            timings = {
+                **context["timings"],
+                "answerMs": answer_ms,
+                "totalMs": int((time.perf_counter() - request_started_at) * 1000),
+            }
             json_response(self, {
                 "answer": answer,
                 "sources": context["sources"],
@@ -959,6 +996,7 @@ class Handler(BaseHTTPRequestHandler):
                     "textChunks": context["textChunks"],
                     "skippedFiles": len(context["skipped"]),
                     "cache": context["cache"],
+                    "timings": timings,
                 },
                 "model": OPENAI_MODEL if OPENAI_API_KEY else "python-drive-live-demo",
             })
