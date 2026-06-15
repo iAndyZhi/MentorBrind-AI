@@ -222,13 +222,22 @@ Request:
 
 ```json
 {
-  "message": "Huachen Equipment stock logic"
+  "message": "Huachen Equipment stock logic",
+  "mode": "mentor"
 }
 ```
+
+Supported answer modes:
+
+- `mentor`: conclusion first, then Brind-style mechanism analysis.
+- `strict citation`: every key judgment needs a citation; unsupported claims must say `Not found in the notes`.
+- `beginner explanation`: fewer technical terms, layered explanation, and a simple analogy when useful.
+- `challenge assumptions`: hidden assumptions first, then counterexamples, risk boundaries, and final judgment.
 
 Response includes:
 
 - `answer`: mentor-style answer
+- `answerMode`: normalized answer mode used by the backend
 - `sources`: protected AI-selected citation labels by default. Source metadata and excerpts are hidden unless debug exposure flags are enabled.
 - `aiJudgment`: AI-generated topic, confidence, and reason
 - `stats`: scanned file count, text chunk count, skipped file count, and index cache status

@@ -89,6 +89,33 @@ DRIVE_INDEX_CACHE: dict[str, Any] = {
     "refreshStats": {},
     "lastError": "",
 }
+ANSWER_MODE_PROMPTS = {
+    "mentor": [
+        "Mode: mentor.",
+        "Start with a direct conclusion, then explain the mechanism behind it.",
+        "Use Brind-like reasoning: mechanism first, incentives and constraints next, then risks and boundary conditions.",
+        "Keep the tone calm, pointed, and mentor-like rather than encyclopedic.",
+    ],
+    "strict citation": [
+        "Mode: strict citation.",
+        "Every important factual claim, causal claim, or judgment must include a citation like [1] or [2].",
+        "If a claim is not supported by the selected notes, say: Not found in the notes.",
+        "Do not rely on outside knowledge except for clearly labeled general background, and keep that background minimal.",
+    ],
+    "beginner explanation": [
+        "Mode: beginner explanation.",
+        "Use fewer technical terms and explain layered ideas step by step.",
+        "Define necessary jargon briefly before using it.",
+        "Use one simple analogy when it helps, but do not let the analogy replace the evidence.",
+    ],
+    "challenge assumptions": [
+        "Mode: challenge assumptions.",
+        "First list the hidden assumptions in the user's question.",
+        "Then list counterexamples or scenarios where those assumptions fail.",
+        "Then define the risk boundaries and what evidence would change the judgment.",
+        "Only after that, give the final judgment.",
+    ],
+}
 INDEX_JOB: dict[str, Any] = {
     "running": False,
     "startedAt": 0.0,
@@ -618,6 +645,21 @@ def parse_json_object(text: str) -> dict[str, Any]:
         return json.loads(match.group(0))
 
 
+def normalize_answer_mode(value: str) -> str:
+    mode = re.sub(r"\s+", " ", str(value or "").strip().lower())
+    return mode if mode in ANSWER_MODE_PROMPTS else "mentor"
+
+
+def parse_message_and_mode(payload: dict[str, Any]) -> tuple[str, str]:
+    message = str(payload.get("message", "")).strip()
+    mode = normalize_answer_mode(str(payload.get("mode", "")))
+    match = re.match(r"^\[([^\]]+)\]\s*(.*)$", message)
+    if match:
+        mode = normalize_answer_mode(match.group(1))
+        message = match.group(2).strip()
+    return message, mode
+
+
 def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
     if not OPENAI_API_KEY:
         fallback = candidates[:MAX_CHUNKS_FOR_MODEL]
@@ -975,7 +1017,8 @@ def fallback_answer(query: str, matches: list[dict[str, Any]], skipped: list[dic
     ])
 
 
-def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: dict[str, Any]) -> str:
+def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: dict[str, Any], answer_mode: str = "mentor") -> str:
+    mode = normalize_answer_mode(answer_mode)
     context = "\n\n---\n\n".join(
         "\n".join([
             f"[{index + 1}] {item.get('title', 'Untitled')}",
@@ -998,6 +1041,9 @@ def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: 
         "5. Do not reveal raw source passages or long quotes. Synthesize the answer from the sources instead.",
         "6. If the user asks for raw notes, full documents, exact transcripts, hidden file names, Drive paths, or bulk extraction, refuse that part and offer a concise synthesized summary instead.",
         "",
+        "Answer mode rules:",
+        *ANSWER_MODE_PROMPTS[mode],
+        "",
         f"Retrieval mode/topic signal: {ai_judgment.get('topic', 'Not judged')}",
         f"Retrieval note: {ai_judgment.get('reason', '')}",
         f"User question: {query}",
@@ -1007,10 +1053,10 @@ def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: 
     ])
 
 
-def openai_answer(query: str, matches: list[dict[str, Any]], ai_judgment: dict[str, Any]) -> str | None:
+def openai_answer(query: str, matches: list[dict[str, Any]], ai_judgment: dict[str, Any], answer_mode: str = "mentor") -> str | None:
     if not OPENAI_API_KEY:
         return None
-    return openai_request(build_answer_prompt(query, matches, ai_judgment))
+    return openai_request(build_answer_prompt(query, matches, ai_judgment, answer_mode))
 
 
 def serve_static(handler: BaseHTTPRequestHandler, request_path: str) -> None:
@@ -1108,7 +1154,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length).decode("utf-8")
-            message = str(json.loads(body or "{}").get("message", "")).strip()
+            message, answer_mode = parse_message_and_mode(json.loads(body or "{}"))
             if not message:
                 json_response(self, {"error": "Message is required."}, 400)
                 return
@@ -1116,7 +1162,7 @@ class Handler(BaseHTTPRequestHandler):
             answer_error = ""
             answer_started_at = time.perf_counter()
             try:
-                answer = openai_answer(message, context["matches"], context["aiJudgment"])
+                answer = openai_answer(message, context["matches"], context["aiJudgment"], answer_mode)
             except Exception as exc:
                 answer_error = str(exc)
                 answer = None
@@ -1140,6 +1186,7 @@ class Handler(BaseHTTPRequestHandler):
                 "sources": context["sources"],
                 "skipped": context["skipped"][:20],
                 "aiJudgment": context["aiJudgment"],
+                "answerMode": answer_mode,
                 "answerError": answer_error,
                 "stats": {
                     "scannedFiles": context["scannedFiles"],

@@ -336,7 +336,7 @@ form.addEventListener("submit", async (event) => {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: `[${mode.value}] ${text}` }),
+      body: JSON.stringify({ message: text, mode: mode.value }),
       signal: controller.signal
     });
     const data = await readJsonResponse(res, "Chat failed");
@@ -347,7 +347,7 @@ form.addEventListener("submit", async (event) => {
       skippedFiles: data.stats?.skippedFiles
     });
     const timingLine = renderTiming(data.stats?.timings);
-    const footer = timingLine ? `Model: ${data.model}\n${timingLine}` : `Model: ${data.model}`;
+    const footer = timingLine ? `Mode: ${data.answerMode || mode.value}\nModel: ${data.model}\n${timingLine}` : `Mode: ${data.answerMode || mode.value}\nModel: ${data.model}`;
     addMessage("assistant", `${data.answer}\n\n${footer}`, data.sources, data.skipped, data.aiJudgment);
   } catch (error) {
     const message = error.name === "AbortError"
