@@ -89,6 +89,13 @@ DRIVE_INDEX_CACHE: dict[str, Any] = {
     "refreshStats": {},
     "lastError": "",
 }
+INDEX_JOB: dict[str, Any] = {
+    "running": False,
+    "startedAt": 0.0,
+    "finishedAt": 0.0,
+    "progress": {},
+    "error": "",
+}
 
 
 class AppError(Exception):
@@ -710,8 +717,16 @@ def index_status_payload() -> dict[str, Any]:
     now = time.time()
     built_at = float(DRIVE_INDEX_CACHE.get("builtAt") or 0)
     expires_at = float(DRIVE_INDEX_CACHE.get("expiresAt") or 0)
+    job_started_at = float(INDEX_JOB.get("startedAt") or 0)
+    job_finished_at = float(INDEX_JOB.get("finishedAt") or 0)
     return {
         "cached": bool(DRIVE_INDEX_CACHE.get("chunks")),
+        "refreshRunning": bool(INDEX_JOB.get("running")),
+        "refreshStartedAt": int(job_started_at) if job_started_at else None,
+        "refreshFinishedAt": int(job_finished_at) if job_finished_at else None,
+        "refreshAgeSeconds": int(now - job_started_at) if job_started_at and INDEX_JOB.get("running") else None,
+        "refreshProgress": INDEX_JOB.get("progress") or {},
+        "refreshError": INDEX_JOB.get("error", ""),
         "folderId": DRIVE_INDEX_CACHE.get("folderId") or DRIVE_FOLDER_ID,
         "builtAt": int(built_at) if built_at else None,
         "ageSeconds": int(now - built_at) if built_at else None,
@@ -723,6 +738,13 @@ def index_status_payload() -> dict[str, Any]:
         "refreshStats": DRIVE_INDEX_CACHE.get("refreshStats") or {},
         "lastError": DRIVE_INDEX_CACHE.get("lastError", ""),
     }
+
+
+def snapshot_drive_index() -> dict[str, Any] | None:
+    with DRIVE_INDEX_LOCK:
+        if DRIVE_INDEX_CACHE.get("folderId") != DRIVE_FOLDER_ID:
+            return None
+        return dict(DRIVE_INDEX_CACHE)
 
 
 def file_signature(file: dict[str, Any]) -> str:
@@ -767,6 +789,8 @@ def build_drive_index(access_token: str, previous_index: dict[str, Any] | None =
         "unsupportedOrFailedFiles": 0,
         "removedFiles": 0,
     }
+    if INDEX_JOB.get("running"):
+        INDEX_JOB["progress"] = dict(stats)
 
     for file in files:
         signature = file_signature(file)
@@ -784,6 +808,8 @@ def build_drive_index(access_token: str, previous_index: dict[str, Any] | None =
         records[file["id"]] = record
         chunks.extend(record.get("chunks") or [])
         skipped.extend(record.get("skipped") or [])
+        if INDEX_JOB.get("running"):
+            INDEX_JOB["progress"] = dict(stats)
 
     previous_ids = set(previous_records.keys())
     current_ids = {file["id"] for file in files}
@@ -829,10 +855,74 @@ def get_drive_index(access_token: str, force_refresh: bool = False) -> dict[str,
         return DRIVE_INDEX_CACHE
 
 
+def run_index_refresh_job(access_token: str) -> None:
+    try:
+        previous_index = snapshot_drive_index()
+        index = build_drive_index(access_token, previous_index)
+        with DRIVE_INDEX_LOCK:
+            DRIVE_INDEX_CACHE.clear()
+            DRIVE_INDEX_CACHE.update(index)
+            INDEX_JOB.update({
+                "running": False,
+                "finishedAt": time.time(),
+                "progress": index.get("refreshStats", {}),
+                "error": "",
+            })
+    except Exception as exc:
+        with DRIVE_INDEX_LOCK:
+            DRIVE_INDEX_CACHE["lastError"] = str(exc)
+            INDEX_JOB.update({
+                "running": False,
+                "finishedAt": time.time(),
+                "progress": INDEX_JOB.get("progress") or {},
+                "error": str(exc),
+            })
+
+
+def start_index_refresh(access_token: str) -> dict[str, Any]:
+    if not access_token:
+        raise AppError("Missing Google Drive access. Set GOOGLE_ACCESS_TOKEN or sign in with Google.")
+    with DRIVE_INDEX_LOCK:
+        if INDEX_JOB.get("running"):
+            return {"started": False, "cache": index_status_payload()}
+        INDEX_JOB.update({
+            "running": True,
+            "startedAt": time.time(),
+            "finishedAt": 0.0,
+            "progress": {},
+            "error": "",
+        })
+    thread = threading.Thread(target=run_index_refresh_job, args=(access_token,), daemon=True)
+    thread.start()
+    return {"started": True, "cache": index_status_payload()}
+
+
+def drive_index_for_chat(access_token: str) -> dict[str, Any]:
+    if not access_token:
+        raise AppError("Missing Google Drive access. Set GOOGLE_ACCESS_TOKEN or sign in with Google.")
+    now = time.time()
+    start_refresh = False
+    with DRIVE_INDEX_LOCK:
+        has_chunks = bool(DRIVE_INDEX_CACHE.get("chunks"))
+        is_current_folder = DRIVE_INDEX_CACHE.get("folderId") == DRIVE_FOLDER_ID
+        is_expired = float(DRIVE_INDEX_CACHE.get("expiresAt") or 0) <= now
+        is_running = bool(INDEX_JOB.get("running"))
+        if has_chunks and is_current_folder:
+            index = dict(DRIVE_INDEX_CACHE)
+            start_refresh = is_expired and not is_running
+        elif is_running:
+            raise AppError("Knowledge index is still building. Wait for the sidebar status to become Cached, then send again.")
+        else:
+            raise AppError("Knowledge index is empty. Click Refresh in the sidebar first, then wait until it becomes Cached.")
+    if start_refresh:
+        start_index_refresh(access_token)
+    return index
+
+
 def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
     timings: dict[str, int] = {}
     started_at = time.perf_counter()
-    index = get_drive_index(access_token)
+    index = drive_index_for_chat(access_token)
     timings["indexMs"] = int((time.perf_counter() - started_at) * 1000)
 
     rank_started_at = time.perf_counter()
@@ -996,14 +1086,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if not require_app_access(self):
                     return
-                index = get_drive_index(access_token_from_request(self), force_refresh=True)
+                result = start_index_refresh(access_token_from_request(self))
                 json_response(self, {
                     "ok": True,
-                    "scannedFiles": len(index.get("files") or []),
-                    "textChunks": len(index.get("chunks") or []),
-                    "skippedFiles": len(index.get("skipped") or []),
-                    "cache": index_status_payload(),
-                })
+                    "started": result["started"],
+                    "cache": result["cache"],
+                }, 202)
             except Exception as exc:
                 json_response(self, {"error": str(exc), "cache": index_status_payload()}, 500)
             return
@@ -1062,6 +1150,8 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 "model": OPENAI_MODEL if OPENAI_API_KEY else "python-drive-live-demo",
             })
+        except AppError as exc:
+            json_response(self, {"error": str(exc), "cache": index_status_payload()}, 409)
         except Exception as exc:
             json_response(self, {"error": str(exc), "cache": index_status_payload()}, 500)
 

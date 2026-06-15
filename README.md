@@ -149,7 +149,7 @@ The backend keeps a Drive-derived index in process memory:
 6. In `fast` mode, the top candidates go directly into the final answer prompt. In `ai` mode, OpenAI first semantically judges and narrows candidates.
 7. The answer is generated from the selected snippets.
 
-Use the sidebar **Refresh** button or `POST /api/index/refresh` to pick up Google Drive changes immediately. Otherwise, updates are picked up automatically after the TTL. The sidebar shows how many files were read, reused, changed, removed, or skipped during the latest index rebuild.
+Use the sidebar **Refresh** button or `POST /api/index/refresh` to pick up Google Drive changes immediately. Refresh runs in a background thread so hosted platforms do not time out while PDFs and DOCX files are parsed. The sidebar shows **Building** during indexing and reports how many files were read, reused, changed, removed, or skipped. Otherwise, updates are picked up automatically after the TTL.
 
 The rough match is only a latency and token-cost reducer. It is not treated as a topic classifier. In `fast` mode the app avoids a separate topic label and lets the final model reason over selected context. In `ai` mode, topic judgment is semantic and no longer depends on hard-coded keyword rules.
 
@@ -214,7 +214,7 @@ Returns non-secret in-memory index status, including whether the index is cached
 
 ### `POST /api/index/refresh`
 
-Forces a new Google Drive listing and incrementally rebuilds the process-memory index. Unchanged files reuse existing in-memory chunks.
+Starts a background Google Drive listing and incrementally rebuilds the process-memory index. Unchanged files reuse existing in-memory chunks. Poll `GET /api/index/status` until `refreshRunning` is `false` and `cached` is `true`.
 
 ### `POST /api/chat`
 

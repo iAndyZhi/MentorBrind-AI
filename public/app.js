@@ -27,6 +27,7 @@ let sourceState = null;
 let accessState = { enabled: false, granted: true };
 let healthState = null;
 const CHAT_TIMEOUT_MS = 75000;
+let indexPollTimer = null;
 
 function addMessage(role, text, sources = [], skipped = [], aiJudgment = null) {
   const node = document.createElement("div");
@@ -179,12 +180,17 @@ function renderIndexDelta(stats) {
 
 function updateIndexControls(index) {
   if (!index) return;
-  indexStatus.textContent = index.cached ? "Cached" : "Empty";
+  indexStatus.textContent = index.refreshRunning ? "Building" : (index.cached ? "Cached" : "Empty");
   indexRefreshIn.textContent = index.cached ? formatDuration(index.expiresInSeconds) : "-";
-  indexDelta.textContent = renderIndexDelta(index.refreshStats);
+  indexDelta.textContent = renderIndexDelta(index.refreshRunning ? index.refreshProgress : index.refreshStats);
   scannedCount.textContent = index.scannedFiles ?? "-";
   chunkCount.textContent = index.textChunks ?? "-";
   skippedCount.textContent = index.skippedFiles ?? "-";
+  refreshIndex.disabled = Boolean(index.refreshRunning);
+  if (index.refreshError) {
+    healthStatus.textContent = "Setup needed";
+    healthMessage.textContent = index.refreshError;
+  }
 }
 
 async function loadAccessStatus() {
@@ -213,6 +219,30 @@ async function loadIndexStatus() {
   const data = await readJsonResponse(res, "Index status failed");
   updateIndexControls(data);
   return data;
+}
+
+function stopIndexPolling() {
+  if (indexPollTimer) {
+    window.clearInterval(indexPollTimer);
+    indexPollTimer = null;
+  }
+}
+
+function startIndexPolling() {
+  stopIndexPolling();
+  indexPollTimer = window.setInterval(async () => {
+    try {
+      const status = await loadIndexStatus();
+      if (!status?.refreshRunning) {
+        stopIndexPolling();
+        await loadHealth();
+      }
+    } catch (error) {
+      stopIndexPolling();
+      healthStatus.textContent = "Setup needed";
+      healthMessage.textContent = error.message;
+    }
+  }, 2000);
 }
 
 unlockApp.addEventListener("click", async () => {
@@ -268,12 +298,14 @@ refreshIndex.addEventListener("click", async () => {
     const res = await fetch("/api/index/refresh", { method: "POST" });
     const data = await readJsonResponse(res, "Refresh failed");
     updateIndexControls(data.cache);
-    await loadHealth();
+    healthStatus.textContent = "Ready";
+    healthMessage.textContent = data.started ? "Building the Drive index in the background." : "Drive index is already building.";
+    startIndexPolling();
   } catch (error) {
     healthStatus.textContent = "Setup needed";
     healthMessage.textContent = error.message;
   } finally {
-    refreshIndex.disabled = false;
+    if (!indexPollTimer) refreshIndex.disabled = false;
   }
 });
 
@@ -332,4 +364,7 @@ form.addEventListener("submit", async (event) => {
 loadAccessStatus()
   .then(loadSources)
   .then(loadHealth)
-  .then(loadIndexStatus);
+  .then(loadIndexStatus)
+  .then((status) => {
+    if (status?.refreshRunning) startIndexPolling();
+  });
