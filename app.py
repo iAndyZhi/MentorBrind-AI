@@ -342,14 +342,21 @@ def refresh_google_session(session: dict[str, Any]) -> bool:
 def service_account_info() -> dict[str, Any] | None:
     raw = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
     if not raw and GOOGLE_SERVICE_ACCOUNT_JSON_B64.strip():
-        raw = base64.b64decode(GOOGLE_SERVICE_ACCOUNT_JSON_B64.strip()).decode("utf-8")
+        encoded = "".join(GOOGLE_SERVICE_ACCOUNT_JSON_B64.split())
+        try:
+            raw = base64.b64decode(encoded, validate=True).decode("utf-8")
+        except Exception as exc:
+            raise AppError("GOOGLE_SERVICE_ACCOUNT_JSON_B64 is not valid base64-encoded UTF-8 JSON. Clear it and use GOOGLE_SERVICE_ACCOUNT_JSON, or paste a base64 string generated from the service account JSON file.") from exc
     if not raw:
         return None
     try:
         info = json.loads(raw)
     except json.JSONDecodeError:
-        raw = raw.replace("\\n", "\n")
-        info = json.loads(raw)
+        try:
+            raw = raw.replace("\\n", "\n")
+            info = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise AppError("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON. Paste the entire service account JSON file content, or use GOOGLE_SERVICE_ACCOUNT_JSON_B64.") from exc
     if info.get("private_key"):
         info["private_key"] = str(info["private_key"]).replace("\\n", "\n")
     return info
