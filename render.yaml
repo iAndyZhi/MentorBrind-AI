@@ -13,6 +13,10 @@ services:
         sync: false
       - key: GOOGLE_DRIVE_FOLDER_ID
         value: "1RbZmNxR8Ga-rnDzckYhoEO8i7FiVigWj"
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON_B64
+        sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET

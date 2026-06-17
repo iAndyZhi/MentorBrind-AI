@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import http.cookies
 import io
 import json
@@ -44,6 +45,8 @@ HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "4173"))
 APP_BASE_URL = os.getenv("APP_BASE_URL", f"http://localhost:{PORT}")
 DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "1RbZmNxR8Ga-rnDzckYhoEO8i7FiVigWj")
+GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+GOOGLE_SERVICE_ACCOUNT_JSON_B64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_B64", "")
 GOOGLE_ACCESS_TOKEN = os.getenv("GOOGLE_ACCESS_TOKEN", "")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
@@ -76,6 +79,7 @@ SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", str(30 * 24 *
 SESSIONS: dict[str, dict[str, Any]] = {}
 ACCESS_SESSIONS: dict[str, float] = {}
 OAUTH_STATES: dict[str, float] = {}
+SERVICE_ACCOUNT_TOKEN: dict[str, Any] = {"accessToken": "", "expiresAt": 0.0, "clientEmail": ""}
 STARTED_AT = time.time()
 DRIVE_INDEX_LOCK = threading.Lock()
 DRIVE_INDEX_CACHE: dict[str, Any] = {
@@ -229,17 +233,24 @@ def logout_app_access(handler: BaseHTTPRequestHandler) -> None:
 
 
 def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    has_google_access = bool(access_token_from_request(handler))
+    google_access_error = ""
+    try:
+        has_google_access = bool(access_token_from_request(handler))
+    except Exception as exc:
+        has_google_access = False
+        google_access_error = str(exc)
     has_oauth_config = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
     missing: list[str] = []
     actions: list[str] = []
 
     if not has_google_access:
         missing.append("google_drive_access")
-        if has_oauth_config:
+        if google_access_error:
+            actions.append(google_access_error)
+        elif has_oauth_config:
             actions.append("Click Connect Google Drive in the sidebar.")
         else:
-            actions.append("Set GOOGLE_ACCESS_TOKEN, or configure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.")
+            actions.append("Set GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_ACCESS_TOKEN, or configure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.")
 
     if not OPENAI_API_KEY:
         missing.append("openai_api_key")
@@ -260,6 +271,9 @@ def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
             "port": PORT,
             "folderId": DRIVE_FOLDER_ID,
             "hasGoogleAccess": has_google_access,
+            "googleAccessError": google_access_error,
+            "hasGoogleServiceAccount": has_service_account_config(),
+            "googleServiceAccountEmail": SERVICE_ACCOUNT_TOKEN.get("clientEmail", ""),
             "hasGoogleEnvToken": bool(GOOGLE_ACCESS_TOKEN),
             "hasGoogleOAuthConfig": has_oauth_config,
             "hasOpenAIKey": bool(OPENAI_API_KEY),
@@ -325,7 +339,54 @@ def refresh_google_session(session: dict[str, Any]) -> bool:
     return True
 
 
+def service_account_info() -> dict[str, Any] | None:
+    raw = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
+    if not raw and GOOGLE_SERVICE_ACCOUNT_JSON_B64.strip():
+        raw = base64.b64decode(GOOGLE_SERVICE_ACCOUNT_JSON_B64.strip()).decode("utf-8")
+    if not raw:
+        return None
+    try:
+        info = json.loads(raw)
+    except json.JSONDecodeError:
+        raw = raw.replace("\\n", "\n")
+        info = json.loads(raw)
+    if info.get("private_key"):
+        info["private_key"] = str(info["private_key"]).replace("\\n", "\n")
+    return info
+
+
+def service_account_access_token() -> str:
+    info = service_account_info()
+    if not info:
+        return ""
+    now = time.time()
+    if SERVICE_ACCOUNT_TOKEN.get("accessToken") and float(SERVICE_ACCOUNT_TOKEN.get("expiresAt") or 0) > now + 60:
+        return str(SERVICE_ACCOUNT_TOKEN["accessToken"])
+    try:
+        from google.auth.transport.requests import Request
+        from google.oauth2 import service_account
+    except Exception as exc:
+        raise AppError("Service account auth requires `pip install -r requirements.txt`.") from exc
+
+    credentials = service_account.Credentials.from_service_account_info(info, scopes=[DRIVE_SCOPE])
+    credentials.refresh(Request())
+    expiry = credentials.expiry.timestamp() if credentials.expiry else now + 3600
+    SERVICE_ACCOUNT_TOKEN.update({
+        "accessToken": credentials.token,
+        "expiresAt": expiry,
+        "clientEmail": info.get("client_email", ""),
+    })
+    return str(credentials.token or "")
+
+
+def has_service_account_config() -> bool:
+    return bool(GOOGLE_SERVICE_ACCOUNT_JSON.strip() or GOOGLE_SERVICE_ACCOUNT_JSON_B64.strip())
+
+
 def access_token_from_request(handler: BaseHTTPRequestHandler) -> str:
+    token = service_account_access_token()
+    if token:
+        return token
     if GOOGLE_ACCESS_TOKEN:
         return GOOGLE_ACCESS_TOKEN
     session = session_from_request(handler)
@@ -340,7 +401,7 @@ def access_token_from_request(handler: BaseHTTPRequestHandler) -> str:
 
 def drive_request(access_token: str, path: str, params: dict[str, str | None] | None = None) -> bytes:
     if not access_token:
-        raise AppError("Missing Google Drive access. Set GOOGLE_ACCESS_TOKEN or sign in with Google.")
+        raise AppError("Missing Google Drive access. Set GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_ACCESS_TOKEN, or sign in with Google.")
 
     query = urllib.parse.urlencode({k: v for k, v in (params or {}).items() if v is not None})
     url = f"https://www.googleapis.com/drive/v3/{path}"
@@ -873,7 +934,7 @@ def build_drive_index(access_token: str, previous_index: dict[str, Any] | None =
 
 def get_drive_index(access_token: str, force_refresh: bool = False) -> dict[str, Any]:
     if not access_token:
-        raise AppError("Missing Google Drive access. Set GOOGLE_ACCESS_TOKEN or sign in with Google.")
+        raise AppError("Missing Google Drive access. Set GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_ACCESS_TOKEN, or sign in with Google.")
 
     now = time.time()
     with DRIVE_INDEX_LOCK:
@@ -923,7 +984,7 @@ def run_index_refresh_job(access_token: str) -> None:
 
 def start_index_refresh(access_token: str) -> dict[str, Any]:
     if not access_token:
-        raise AppError("Missing Google Drive access. Set GOOGLE_ACCESS_TOKEN or sign in with Google.")
+        raise AppError("Missing Google Drive access. Set GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_ACCESS_TOKEN, or sign in with Google.")
     with DRIVE_INDEX_LOCK:
         if INDEX_JOB.get("running"):
             return {"started": False, "cache": index_status_payload()}
@@ -1091,11 +1152,19 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
         if parsed.path == "/api/sources":
-            has_session_token = bool(access_token_from_request(self))
+            google_access_error = ""
+            try:
+                has_session_token = bool(access_token_from_request(self))
+            except Exception as exc:
+                has_session_token = False
+                google_access_error = str(exc)
             json_response(self, {
                 "mode": "python-drive-live-ai-judged",
                 "folderId": DRIVE_FOLDER_ID,
                 "hasGoogleToken": has_session_token,
+                "googleAccessError": google_access_error,
+                "hasGoogleServiceAccount": has_service_account_config(),
+                "googleServiceAccountEmail": SERVICE_ACCOUNT_TOKEN.get("clientEmail", ""),
                 "hasGoogleEnvToken": bool(GOOGLE_ACCESS_TOKEN),
                 "hasGoogleOAuthConfig": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
                 "hasOpenAIKey": bool(OPENAI_API_KEY),

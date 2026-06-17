@@ -130,7 +130,7 @@ function updateAuthControls(data) {
   storageStatus.textContent = data.storesLocalDocuments ? "Yes" : "No";
 
   connectDrive.hidden = data.hasGoogleToken || !data.hasGoogleOAuthConfig;
-  disconnectDrive.hidden = !data.hasGoogleToken || data.hasGoogleEnvToken;
+  disconnectDrive.hidden = !data.hasGoogleToken || data.hasGoogleEnvToken || data.hasGoogleServiceAccount;
   updateIndexControls(data.driveIndex);
 }
 

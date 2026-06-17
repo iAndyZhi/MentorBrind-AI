@@ -117,6 +117,8 @@ $env:PORT="4175"
 | Variable | Purpose |
 | --- | --- |
 | `GOOGLE_DRIVE_FOLDER_ID` | Google Drive folder ID to read from |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Optional service account JSON credentials. Recommended for hosted use so users do not need Google OAuth. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON_B64` | Optional base64-encoded service account JSON. Use this if the host UI does not handle multiline JSON well. |
 | `GOOGLE_ACCESS_TOKEN` | Optional manual Google OAuth access token with Drive read permission |
 | `GOOGLE_CLIENT_ID` | Optional Google OAuth client ID for in-app sign-in |
 | `GOOGLE_CLIENT_SECRET` | Optional Google OAuth client secret for in-app sign-in |
@@ -155,9 +157,26 @@ The rough match is only a latency and token-cost reducer. It is not treated as a
 
 If `OPENAI_API_KEY` is not configured, the app clearly reports that AI topic judgment is disabled instead of inventing a topic label.
 
+## Google Drive Access
+
+For hosted use, prefer a Google service account:
+
+1. Create a Google Cloud service account.
+2. Create a JSON key for that service account.
+3. Share the target Google Drive folder with the service account `client_email` as a viewer.
+4. Put the full JSON key into `GOOGLE_SERVICE_ACCOUNT_JSON`, or a base64-encoded copy into `GOOGLE_SERVICE_ACCOUNT_JSON_B64`.
+
+When service account credentials are configured, the backend reads Drive automatically after users unlock the app. Users do not need to click **Connect Google Drive**.
+
+For Render, `GOOGLE_SERVICE_ACCOUNT_JSON_B64` is usually easier because it avoids multiline secret formatting issues. On Windows PowerShell:
+
+```powershell
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content .\service-account.json -Raw)))
+```
+
 ## Google OAuth Login
 
-For local development, you can either paste a short-lived `GOOGLE_ACCESS_TOKEN` into the environment or configure Google OAuth and use the in-app **Connect Google Drive** button.
+For local development or fallback use, you can either paste a short-lived `GOOGLE_ACCESS_TOKEN` into the environment or configure Google OAuth and use the in-app **Connect Google Drive** button.
 
 To use OAuth:
 
@@ -284,9 +303,7 @@ Instance Type: Free
 HOST=0.0.0.0
 APP_BASE_URL=https://your-render-service.onrender.com
 GOOGLE_DRIVE_FOLDER_ID=1RbZmNxR8Ga-rnDzckYhoEO8i7FiVigWj
-GOOGLE_CLIENT_ID=<google-oauth-client-id>
-GOOGLE_CLIENT_SECRET=<google-oauth-client-secret>
-GOOGLE_REDIRECT_URI=https://your-render-service.onrender.com/api/auth/google/callback
+GOOGLE_SERVICE_ACCOUNT_JSON_B64=<base64-service-account-json>
 APP_ACCESS_CODE=<private-app-passcode>
 COOKIE_SECURE=true
 OPENAI_API_KEY=<openai-api-key>
@@ -296,7 +313,15 @@ AI_RETRIEVAL_MODE=fast
 DRIVE_INDEX_TTL_SECONDS=900
 ```
 
-5. In Google Cloud Console, add this OAuth authorized redirect URI:
+If you use Google OAuth fallback instead of service account credentials, also set:
+
+```text
+GOOGLE_CLIENT_ID=<google-oauth-client-id>
+GOOGLE_CLIENT_SECRET=<google-oauth-client-secret>
+GOOGLE_REDIRECT_URI=https://your-render-service.onrender.com/api/auth/google/callback
+```
+
+5. If using Google OAuth fallback, add this authorized redirect URI in Google Cloud Console:
 
 ```text
 https://your-render-service.onrender.com/api/auth/google/callback
