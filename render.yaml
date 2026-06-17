@@ -12,7 +12,7 @@ services:
       - key: APP_BASE_URL
         sync: false
       - key: GOOGLE_DRIVE_FOLDER_ID
-        value: "1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC"
+        value: "1RbZmNxR8Ga-rnDzckYhoEO8i7FiVigWj"
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET

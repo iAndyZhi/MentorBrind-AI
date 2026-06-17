@@ -41,7 +41,7 @@ https://www.googleapis.com/auth/drive.readonly
 Default Google Drive folder ID:
 
 ```text
-1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC
+1RbZmNxR8Ga-rnDzckYhoEO8i7FiVigWj
 ```
 
 ## Preview Locally
@@ -80,7 +80,7 @@ cd C:\Users\mrand\Documents\Codex\2026-06-11\ai-mentor-google-drive-brind-openai
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
-$env:GOOGLE_DRIVE_FOLDER_ID="1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC"
+$env:GOOGLE_DRIVE_FOLDER_ID="1RbZmNxR8Ga-rnDzckYhoEO8i7FiVigWj"
 $env:GOOGLE_ACCESS_TOKEN="<google-oauth-access-token>"
 $env:GOOGLE_CLIENT_ID="<google-oauth-client-id>"
 $env:GOOGLE_CLIENT_SECRET="<google-oauth-client-secret>"
@@ -283,7 +283,7 @@ Instance Type: Free
 ```text
 HOST=0.0.0.0
 APP_BASE_URL=https://your-render-service.onrender.com
-GOOGLE_DRIVE_FOLDER_ID=1qSD6wwFWTaJtZLVZ-pEHnLOjJXJbS8OC
+GOOGLE_DRIVE_FOLDER_ID=1RbZmNxR8Ga-rnDzckYhoEO8i7FiVigWj
 GOOGLE_CLIENT_ID=<google-oauth-client-id>
 GOOGLE_CLIENT_SECRET=<google-oauth-client-secret>
 GOOGLE_REDIRECT_URI=https://your-render-service.onrender.com/api/auth/google/callback
