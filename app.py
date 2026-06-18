@@ -55,7 +55,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 APP_ACCESS_CODE = os.getenv("APP_ACCESS_CODE", "").strip()
 EXPOSE_SOURCE_METADATA = os.getenv("EXPOSE_SOURCE_METADATA", "").lower() in {"1", "true", "yes"}
-EXPOSE_SOURCE_EXCERPTS = os.getenv("EXPOSE_SOURCE_EXCERPTS", "").lower() in {"1", "true", "yes"}
+EXPOSE_SOURCE_EXCERPTS = os.getenv("EXPOSE_SOURCE_EXCERPTS", "true").lower() in {"1", "true", "yes"}
+SOURCE_EXCERPT_MAX_CHARS = int(os.getenv("SOURCE_EXCERPT_MAX_CHARS", "100"))
 MAX_FILES_PER_QUERY = int(os.getenv("MAX_FILES_PER_QUERY", "160"))
 MAX_CHUNKS_FOR_MODEL = int(os.getenv("MAX_CHUNKS_FOR_MODEL", "8"))
 MAX_CANDIDATES_FOR_AI = int(os.getenv("MAX_CANDIDATES_FOR_AI", "30"))
@@ -285,6 +286,7 @@ def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
             "accessCodeLength": len(APP_ACCESS_CODE),
             "exposesSourceMetadata": EXPOSE_SOURCE_METADATA,
             "exposesSourceExcerpts": EXPOSE_SOURCE_EXCERPTS,
+            "sourceExcerptMaxChars": SOURCE_EXCERPT_MAX_CHARS,
             "storesLocalDocuments": False,
             "loadsDotEnv": (ROOT / ".env").exists(),
             "driveIndex": index_status_payload(),
@@ -641,7 +643,9 @@ def clean_excerpt(text: str, limit: int = 420) -> str:
     compact = re.sub(r"\s+", " ", text).strip()
     if len(compact) <= limit:
         return compact
-    return f"{compact[:limit].rstrip()}..."
+    if limit <= 3:
+        return compact[:limit]
+    return f"{compact[:limit - 3].rstrip()}..."
 
 
 def make_chunk(file: dict[str, Any], content: str, index: int) -> dict[str, Any]:
@@ -701,6 +705,25 @@ def rough_rank_chunks(query: str, chunks: list[dict[str, Any]], limit: int = MAX
     if not scored:
         scored = [{**item, "roughScore": 0} for item in chunks[:limit]]
     return sorted(scored, key=lambda item: item["roughScore"], reverse=True)[:limit]
+
+
+def note_coverage(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    scores = [int(item.get("roughScore", 0) or 0) for item in candidates]
+    top_score = max(scores, default=0)
+    matched_candidates = sum(1 for score in scores if score > 0)
+    if top_score <= 0:
+        level = "low"
+    elif top_score >= 8 or (top_score >= 6 and matched_candidates >= 3):
+        level = "high"
+    elif top_score >= 4 or matched_candidates >= 2:
+        level = "medium"
+    else:
+        level = "low"
+    return {
+        "level": level,
+        "topRoughScore": top_score,
+        "matchedCandidates": matched_candidates,
+    }
 
 
 def parse_json_object(text: str) -> dict[str, Any]:
@@ -818,7 +841,7 @@ def public_sources(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "aiTopic": item.get("aiTopic", ""),
             })
         if EXPOSE_SOURCE_EXCERPTS:
-            source["excerpt"] = item.get("excerpt", clean_excerpt(item.get("content", "")))
+            source["excerpt"] = clean_excerpt(item.get("content", ""), SOURCE_EXCERPT_MAX_CHARS)
         sources.append(source)
     return sources
 
@@ -1039,11 +1062,15 @@ def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
     chunks = list(index.get("chunks") or [])
     skipped = list(index.get("skipped") or [])
     candidates = rough_rank_chunks(query, chunks)
+    coverage = note_coverage(candidates)
     timings["rankMs"] = int((time.perf_counter() - rank_started_at) * 1000)
 
     judge_started_at = time.perf_counter()
     if AI_RETRIEVAL_MODE == "ai":
         ai_judgment = ai_select_context(query, candidates)
+        semantic_confidence = str(ai_judgment.get("confidence", "low")).lower()
+        if ai_judgment.get("selected") and semantic_confidence in {"high", "medium"}:
+            coverage["level"] = semantic_confidence
     else:
         ai_judgment = fast_select_context(query, candidates)
     timings["judgeMs"] = int((time.perf_counter() - judge_started_at) * 1000)
@@ -1059,6 +1086,7 @@ def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
             "topic": ai_judgment["topic"],
             "confidence": ai_judgment["confidence"],
             "reason": ai_judgment["reason"],
+            "noteCoverage": coverage,
         },
     }
 
@@ -1085,6 +1113,17 @@ def fallback_answer(query: str, matches: list[dict[str, Any]], skipped: list[dic
     ])
 
 
+def add_low_coverage_notice(answer: str, query: str, ai_judgment: dict[str, Any]) -> str:
+    coverage = ai_judgment.get("noteCoverage") or {}
+    if coverage.get("level") != "low":
+        return answer
+    if re.search(r"[\u4e00-\u9fff]", query):
+        notice = "\u8bf4\u660e\uff1a\u73b0\u6709\u7b14\u8bb0\u4e0e\u8fd9\u4e2a\u95ee\u9898\u7684\u76f4\u63a5\u91cd\u5408\u5ea6\u8f83\u4f4e\uff0c\u4ee5\u4e0b\u56de\u7b54\u5c06\u4ee5\u7b14\u8bb0\u4e2d\u6700\u63a5\u8fd1\u7684\u539f\u5219\u4e3a\u8d77\u70b9\u8fdb\u884c\u63a8\u6f14\u3002"
+    else:
+        notice = "Note: The available notes have low direct overlap with this question. The answer below extrapolates from the closest principles in the notes."
+    return f"{notice}\n\n{answer}"
+
+
 def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: dict[str, Any], answer_mode: str = "mentor") -> str:
     mode = normalize_answer_mode(answer_mode)
     context = "\n\n---\n\n".join(
@@ -1103,17 +1142,20 @@ def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: 
         "Do not classify by keywords. Treat the earlier AI retrieval judgment as the topic signal.",
         "Rules:",
         "1. Start with the conclusion, then explain the reasoning.",
-        "2. If the sources are insufficient, say so clearly and do not fabricate.",
+        "2. Treat the Brind notes as the primary frame for every answer. Ground the main reasoning in the notes first, then extend outward from their mechanisms, incentives, constraints, and risk boundaries.",
         "3. For stock, finance, or medical questions, provide educational analysis only. Do not give deterministic buy/sell, diagnosis, or medication instructions.",
         "4. Cite source numbers in the answer, using forms like [1] or [2].",
         "5. Do not reveal raw source passages or long quotes. Synthesize the answer from the sources instead.",
         "6. If the user asks for raw notes, full documents, exact transcripts, hidden file names, Drive paths, or bulk extraction, refuse that part and offer a concise synthesized summary instead.",
+        "7. Clearly distinguish what is directly supported by the notes from what is your reasoned extension. Never present an extension as a direct statement from Brind.",
+        "8. If note coverage is low, acknowledge that in the opening and avoid confident unsupported specifics.",
         "",
         "Answer mode rules:",
         *ANSWER_MODE_PROMPTS[mode],
         "",
         f"Retrieval mode/topic signal: {ai_judgment.get('topic', 'Not judged')}",
         f"Retrieval note: {ai_judgment.get('reason', '')}",
+        f"Note coverage: {(ai_judgment.get('noteCoverage') or {}).get('level', 'unknown')}",
         f"User question: {query}",
         "",
         "Live Google Drive sources selected by AI:",
@@ -1252,6 +1294,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 if answer_error:
                     answer = f"{answer}\n\nAnswer generation error: {answer_error}"
+            answer = add_low_coverage_notice(answer, message, context["aiJudgment"])
             timings = {
                 **context["timings"],
                 "answerMs": answer_ms,

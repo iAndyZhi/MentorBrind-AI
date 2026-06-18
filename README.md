@@ -10,7 +10,7 @@ A private AI mentor prototype built around Brind's notes, quotes, and records. T
 - Uses rough text matching only to narrow candidates, then delegates topic judgment and final source selection to OpenAI.
 - Supports either a manually provided Google access token or an in-app Google OAuth login.
 - Supports an optional app access code for lightweight private sharing.
-- Returns protected numbered citations by default, without raw source text, Drive IDs, file paths, or snippet previews.
+- Returns protected numbered citations with a controlled excerpt of up to 100 characters, while hiding Drive IDs, file paths, and full source text.
 - Generates mentor-style answers inspired by the notes' ideas, rhythm, and reasoning style, while staying honest that it is not Brind.
 - Treats stock, finance, and medical questions as educational analysis only, not as deterministic trading, investment, diagnosis, or medication instructions.
 
@@ -126,7 +126,8 @@ $env:PORT="4175"
 | `SESSION_MAX_AGE_SECONDS` | In-memory OAuth session lifetime, default 30 days |
 | `APP_ACCESS_CODE` | Optional lightweight app passcode. If set, users must unlock the app before chat or Google OAuth. |
 | `EXPOSE_SOURCE_METADATA` | Optional debug flag. Default `false`; when true, source titles/paths/modified times can be returned to the UI. |
-| `EXPOSE_SOURCE_EXCERPTS` | Optional debug flag. Default `false`; when true, snippet excerpts can be returned to the UI. Do not enable for users who should not see source data. |
+| `EXPOSE_SOURCE_EXCERPTS` | Controls citation excerpt visibility. Default `true`; excerpts remain bounded by `SOURCE_EXCERPT_MAX_CHARS`. |
+| `SOURCE_EXCERPT_MAX_CHARS` | Maximum visible citation excerpt length, including the ellipsis. Default `100`. |
 | `OPENAI_API_KEY` | OpenAI API key for topic judgment and final answers |
 | `OPENAI_MODEL` | Model used for judgment and answer generation |
 | `OPENAI_TIMEOUT_SECONDS` | Maximum wait for each OpenAI request before falling back, default 45 seconds |
@@ -154,6 +155,8 @@ The backend keeps a Drive-derived index in process memory:
 Use the sidebar **Refresh** button or `POST /api/index/refresh` to pick up Google Drive changes immediately. Refresh runs in a background thread so hosted platforms do not time out while PDFs and DOCX files are parsed. The sidebar shows **Building** during indexing and reports how many files were read, reused, changed, removed, or skipped. Otherwise, updates are picked up automatically after the TTL.
 
 The rough match is only a latency and token-cost reducer. It is not treated as a topic classifier. In `fast` mode the app avoids a separate topic label and lets the final model reason over selected context. In `ai` mode, topic judgment is semantic and no longer depends on hard-coded keyword rules.
+
+Every answer uses the notes as its primary reasoning frame before extending outward. When direct note overlap is low, the backend prepends a disclosure and requires the model to distinguish note-supported claims from reasoned extensions.
 
 If `OPENAI_API_KEY` is not configured, the app clearly reports that AI topic judgment is disabled instead of inventing a topic label.
 
@@ -257,8 +260,8 @@ Response includes:
 
 - `answer`: mentor-style answer
 - `answerMode`: normalized answer mode used by the backend
-- `sources`: protected AI-selected citation labels by default. Source metadata and excerpts are hidden unless debug exposure flags are enabled.
-- `aiJudgment`: AI-generated topic, confidence, and reason
+- `sources`: protected AI-selected citations with excerpts capped at 100 characters by default; file metadata remains hidden.
+- `aiJudgment`: AI-generated topic, confidence, reason, and note coverage level
 - `stats`: scanned file count, text chunk count, skipped file count, and index cache status
 - `skipped`: files that could not be read and the reason
 

@@ -37,7 +37,8 @@ function addMessage(role, text, sources = [], skipped = [], aiJudgment = null) {
   if (aiJudgment?.topic) {
     const judgment = document.createElement("div");
     judgment.className = "source topic";
-    judgment.textContent = `AI topic: ${aiJudgment.topic} - confidence: ${aiJudgment.confidence || "low"}`;
+    const coverage = aiJudgment.noteCoverage?.level || "unknown";
+    judgment.textContent = `AI topic: ${aiJudgment.topic} - confidence: ${aiJudgment.confidence || "low"} - note coverage: ${coverage}`;
     node.appendChild(judgment);
   }
 
