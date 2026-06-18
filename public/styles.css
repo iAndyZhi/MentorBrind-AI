@@ -23,17 +23,21 @@ body {
 
 .shell {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 340px minmax(0, 1fr);
   min-height: 100vh;
 }
 
 .sidebar {
   border-right: 1px solid var(--line);
-  padding: 28px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 16px;
   background: #fbfaf6;
+}
+
+.brand-block {
+  padding: 4px 2px 2px;
 }
 
 .eyebrow {
@@ -51,15 +55,34 @@ h1 {
 }
 
 .subtle {
+  margin: 14px 0 0;
   color: var(--muted);
+  font-size: 14px;
   line-height: 1.5;
+}
+
+.tagline {
+  margin: 14px 0 0;
+  color: var(--accent-2);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .panel {
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 14px;
   background: var(--panel);
+}
+
+.panel-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .panel-header {
@@ -67,7 +90,87 @@ h1 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 6px;
+  margin-bottom: 12px;
+}
+
+.system-grid,
+.index-primary,
+.index-counts {
+  display: grid;
+  gap: 8px;
+}
+
+.system-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.mini-stat,
+.metric {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f7f5f0;
+}
+
+.mini-stat span,
+.metric span,
+.index-delta span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mini-stat strong,
+.metric strong {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--accent);
+  font-size: 16px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.index-primary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.index-primary .metric strong {
+  font-size: 23px;
+}
+
+.index-counts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 8px;
+}
+
+.metric.compact {
+  text-align: center;
+}
+
+.metric.compact strong {
+  font-size: 20px;
+}
+
+.index-delta {
+  margin-top: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.index-delta strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .stat {
