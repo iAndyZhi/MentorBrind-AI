@@ -33,6 +33,10 @@ services:
         value: "fast"
       - key: APP_ACCESS_CODE
         sync: false
+      - key: APP_SESSION_SECRET
+        generateValue: true
+      - key: ACCESS_MAX_AGE_SECONDS
+        value: "15552000"
       - key: COOKIE_SECURE
         value: "true"
       - key: DRIVE_INDEX_TTL_SECONDS

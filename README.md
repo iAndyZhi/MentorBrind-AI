@@ -125,6 +125,8 @@ $env:PORT="4175"
 | `GOOGLE_REDIRECT_URI` | OAuth callback URL, default `http://localhost:4173/api/auth/google/callback` |
 | `SESSION_MAX_AGE_SECONDS` | In-memory OAuth session lifetime, default 30 days |
 | `APP_ACCESS_CODE` | Optional lightweight app passcode. If set, users must unlock the app before chat or Google OAuth. |
+| `APP_SESSION_SECRET` | Stable secret used to sign persistent app-access cookies. Keep this unchanged across deploys. |
+| `ACCESS_MAX_AGE_SECONDS` | App-access cookie lifetime. Default `15552000` seconds (180 days). |
 | `EXPOSE_SOURCE_METADATA` | Optional debug flag. Default `false`; when true, source titles/paths/modified times can be returned to the UI. |
 | `EXPOSE_SOURCE_EXCERPTS` | Controls citation excerpt visibility. Default `true`; excerpts remain bounded by `SOURCE_EXCERPT_MAX_CHARS`. |
 | `SOURCE_EXCERPT_MAX_CHARS` | Maximum visible citation excerpt length, including the ellipsis. Default `100`. |
@@ -199,7 +201,9 @@ In this prototype, OAuth tokens are kept in process memory and associated with a
 
 Set `APP_ACCESS_CODE` to add a simple passcode gate for early private sharing. When it is set, users must unlock the app before they can start Google OAuth or send chat requests.
 
-This is intentionally lightweight and stored in process memory. It is useful for a private prototype, but it is not a replacement for production user accounts, audit logs, rate limits, or a proper authorization system.
+Successful unlocks use an HttpOnly signed cookie and do not depend on process memory, so Render restarts and free-tier sleep do not force users to unlock again. The default cookie lifetime is 180 days. Set a stable `APP_SESSION_SECRET`; changing it invalidates all existing access cookies.
+
+This remains a lightweight passcode gate. It is useful for a private prototype, but it is not a replacement for production user accounts, audit logs, rate limits, or a proper authorization system.
 
 ## Supported File Types
 
@@ -308,6 +312,8 @@ APP_BASE_URL=https://your-render-service.onrender.com
 GOOGLE_DRIVE_FOLDER_ID=1RbZmNxR8Ga-rnDzckYhoEO8i7FiVigWj
 GOOGLE_SERVICE_ACCOUNT_JSON_B64=<base64-service-account-json>
 APP_ACCESS_CODE=<private-app-passcode>
+APP_SESSION_SECRET=<stable-random-secret>
+ACCESS_MAX_AGE_SECONDS=15552000
 COOKIE_SECURE=true
 OPENAI_API_KEY=<openai-api-key>
 OPENAI_MODEL=gpt-5.4-mini
@@ -331,7 +337,7 @@ https://your-render-service.onrender.com/api/auth/google/callback
 ```
 
 6. If the OAuth app is still in Testing mode, add every Google account that needs access as a test user.
-7. Deploy, open the Render URL, enter the app access code, then click **Connect Google Drive**.
+7. Deploy, open the Render URL, enter the app access code once, then refresh the Drive index. With service account credentials, no Google login is needed.
 
 ### Production Gaps
 

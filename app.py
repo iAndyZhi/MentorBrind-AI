@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import http.cookies
 import io
 import json
@@ -54,6 +56,7 @@ GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", f"{APP_BASE_URL}/api/auth
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 APP_ACCESS_CODE = os.getenv("APP_ACCESS_CODE", "").strip()
+APP_SESSION_SECRET = os.getenv("APP_SESSION_SECRET", "").strip()
 EXPOSE_SOURCE_METADATA = os.getenv("EXPOSE_SOURCE_METADATA", "").lower() in {"1", "true", "yes"}
 EXPOSE_SOURCE_EXCERPTS = os.getenv("EXPOSE_SOURCE_EXCERPTS", "true").lower() in {"1", "true", "yes"}
 SOURCE_EXCERPT_MAX_CHARS = int(os.getenv("SOURCE_EXCERPT_MAX_CHARS", "100"))
@@ -76,9 +79,9 @@ SESSION_COOKIE = "mentorbrind_session"
 ACCESS_COOKIE = "mentorbrind_access"
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", str(30 * 24 * 60 * 60)))
+ACCESS_MAX_AGE_SECONDS = int(os.getenv("ACCESS_MAX_AGE_SECONDS", str(180 * 24 * 60 * 60)))
 
 SESSIONS: dict[str, dict[str, Any]] = {}
-ACCESS_SESSIONS: dict[str, float] = {}
 OAUTH_STATES: dict[str, float] = {}
 SERVICE_ACCOUNT_TOKEN: dict[str, Any] = {"accessToken": "", "expiresAt": 0.0, "clientEmail": ""}
 STARTED_AT = time.time()
@@ -181,8 +184,35 @@ def clear_session_cookie() -> str:
     return make_session_cookie("", 0)
 
 
-def make_access_cookie(access_id: str, max_age: int) -> str:
-    return make_cookie(ACCESS_COOKIE, access_id, max_age)
+def access_signing_key() -> bytes:
+    return (APP_SESSION_SECRET or APP_ACCESS_CODE).encode("utf-8")
+
+
+def make_access_token(max_age: int) -> str:
+    expires_at = int(time.time()) + max_age
+    nonce = secrets.token_urlsafe(12)
+    payload = f"{expires_at}.{nonce}"
+    signature = hmac.new(access_signing_key(), payload.encode("utf-8"), hashlib.sha256).digest()
+    encoded_signature = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+    return f"{payload}.{encoded_signature}"
+
+
+def valid_access_token(token: str) -> bool:
+    try:
+        expires_text, nonce, provided_signature = token.split(".", 2)
+        expires_at = int(expires_text)
+    except (TypeError, ValueError):
+        return False
+    if expires_at <= int(time.time()) or not nonce:
+        return False
+    payload = f"{expires_at}.{nonce}"
+    expected = hmac.new(access_signing_key(), payload.encode("utf-8"), hashlib.sha256).digest()
+    expected_signature = base64.urlsafe_b64encode(expected).decode("ascii").rstrip("=")
+    return secrets.compare_digest(provided_signature, expected_signature)
+
+
+def make_access_cookie(access_token: str, max_age: int) -> str:
+    return make_cookie(ACCESS_COOKIE, access_token, max_age)
 
 
 def clear_access_cookie() -> str:
@@ -192,14 +222,8 @@ def clear_access_cookie() -> str:
 def has_app_access(handler: BaseHTTPRequestHandler) -> bool:
     if not APP_ACCESS_CODE:
         return True
-    access_id = parse_cookie(handler.headers.get("Cookie")).get(ACCESS_COOKIE)
-    if not access_id:
-        return False
-    expires_at = ACCESS_SESSIONS.get(access_id, 0)
-    if expires_at <= time.time():
-        ACCESS_SESSIONS.pop(access_id, None)
-        return False
-    return True
+    token = parse_cookie(handler.headers.get("Cookie")).get(ACCESS_COOKIE, "")
+    return valid_access_token(token) if token else False
 
 
 def require_app_access(handler: BaseHTTPRequestHandler) -> bool:
@@ -221,15 +245,11 @@ def login_app_access(handler: BaseHTTPRequestHandler) -> None:
         json_response(handler, {"error": "Invalid access code."}, 401)
         return
 
-    access_id = secrets.token_urlsafe(32)
-    ACCESS_SESSIONS[access_id] = time.time() + SESSION_MAX_AGE_SECONDS
-    json_response(handler, {"ok": True, "enabled": True}, headers={"Set-Cookie": make_access_cookie(access_id, SESSION_MAX_AGE_SECONDS)})
+    access_token = make_access_token(ACCESS_MAX_AGE_SECONDS)
+    json_response(handler, {"ok": True, "enabled": True}, headers={"Set-Cookie": make_access_cookie(access_token, ACCESS_MAX_AGE_SECONDS)})
 
 
 def logout_app_access(handler: BaseHTTPRequestHandler) -> None:
-    access_id = parse_cookie(handler.headers.get("Cookie")).get(ACCESS_COOKIE)
-    if access_id:
-        ACCESS_SESSIONS.pop(access_id, None)
     json_response(handler, {"ok": True}, headers={"Set-Cookie": clear_access_cookie()})
 
 
@@ -284,6 +304,9 @@ def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
             "cookieSecure": COOKIE_SECURE,
             "appAccessCodeEnabled": bool(APP_ACCESS_CODE),
             "accessCodeLength": len(APP_ACCESS_CODE),
+            "accessSessionStateless": True,
+            "accessMaxAgeSeconds": ACCESS_MAX_AGE_SECONDS,
+            "hasAppSessionSecret": bool(APP_SESSION_SECRET),
             "exposesSourceMetadata": EXPOSE_SOURCE_METADATA,
             "exposesSourceExcerpts": EXPOSE_SOURCE_EXCERPTS,
             "sourceExcerptMaxChars": SOURCE_EXCERPT_MAX_CHARS,
