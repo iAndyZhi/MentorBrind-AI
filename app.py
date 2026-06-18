@@ -670,6 +670,58 @@ def clean_excerpt(text: str, limit: int = 420) -> str:
     return f"{compact[:limit - 3].rstrip()}..."
 
 
+def relevant_excerpt(text: str, query: str, limit: int = 100) -> str:
+    """Return a bounded window around the sentence with the best query overlap."""
+    compact = re.sub(r"\s+", " ", text).strip()
+    if len(compact) <= limit:
+        return compact
+    if limit <= 6:
+        return compact[:limit]
+
+    query_text = re.sub(r"\s+", " ", query).strip().lower()
+    terms = sorted(tokenize(query), key=len, reverse=True)
+    sentences = list(re.finditer(r"[^。！？!?；;]+(?:[。！？!?；;]+|$)", compact))
+
+    def sentence_score(match: re.Match[str]) -> int:
+        sentence = match.group(0).lower()
+        exact_score = 1000 if query_text and query_text in sentence else 0
+        overlap_score = sum((len(term) ** 2) * sentence.count(term) for term in terms if term in sentence)
+        return exact_score + overlap_score
+
+    best = max(sentences, key=sentence_score) if sentences else None
+    if not best or sentence_score(best) <= 0:
+        return clean_excerpt(compact, limit)
+
+    best_text = best.group(0).lower()
+    matching_positions = [
+        (best_text.find(term), len(term))
+        for term in terms
+        if term and best_text.find(term) >= 0
+    ]
+    if matching_positions:
+        position, term_length = min(matching_positions, key=lambda item: item[0])
+        anchor = best.start() + position + term_length // 2
+    else:
+        anchor = (best.start() + best.end()) // 2
+
+    prefix = suffix = True
+    start = end = 0
+    for _ in range(3):
+        budget = max(1, limit - (3 if prefix else 0) - (3 if suffix else 0))
+        if best.end() - best.start() <= budget:
+            surrounding = budget - (best.end() - best.start())
+            desired_start = best.start() - surrounding // 4
+        else:
+            desired_start = anchor - budget // 3
+        start = max(0, min(len(compact) - budget, desired_start))
+        end = min(len(compact), start + budget)
+        prefix = start > 0
+        suffix = end < len(compact)
+
+    excerpt = compact[start:end].strip()
+    return f"{'...' if prefix else ''}{excerpt}{'...' if suffix else ''}"
+
+
 def make_chunk(file: dict[str, Any], content: str, index: int) -> dict[str, Any]:
     return {
         "id": f"{file['id']}#{index}",
@@ -862,7 +914,7 @@ def citation_context(item: dict[str, Any], chunk_lookup: dict[tuple[str, int], s
     return "\n\n".join(section for section in sections if section)
 
 
-def public_sources(matches: list[dict[str, Any]], all_chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def public_sources(matches: list[dict[str, Any]], all_chunks: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
     chunk_lookup = {
         (str(chunk.get("driveId", "")), int(chunk.get("chunkIndex", 0) or 0)): str(chunk.get("content", ""))
         for chunk in all_chunks
@@ -881,7 +933,7 @@ def public_sources(matches: list[dict[str, Any]], all_chunks: list[dict[str, Any
                 "chunkIndex": item.get("chunkIndex", 0),
                 "aiTopic": item.get("aiTopic", ""),
             })
-        source["excerpt"] = clean_excerpt(citation_context(item, chunk_lookup), SOURCE_EXCERPT_CHARS)
+        source["excerpt"] = relevant_excerpt(citation_context(item, chunk_lookup), query, SOURCE_EXCERPT_CHARS)
         sources.append(source)
     return sources
 
@@ -1121,7 +1173,7 @@ def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
         "textChunks": len(chunks),
         "skipped": skipped,
         "matches": ai_judgment["selected"],
-        "sources": public_sources(ai_judgment["selected"], chunks),
+        "sources": public_sources(ai_judgment["selected"], chunks, query),
         "aiJudgment": {
             "topic": ai_judgment["topic"],
             "confidence": ai_judgment["confidence"],
