@@ -59,13 +59,12 @@ APP_ACCESS_CODE = os.getenv("APP_ACCESS_CODE", "").strip()
 APP_SESSION_SECRET = os.getenv("APP_SESSION_SECRET", "").strip()
 EXPOSE_SOURCE_METADATA = os.getenv("EXPOSE_SOURCE_METADATA", "").lower() in {"1", "true", "yes"}
 EXPOSE_SOURCE_EXCERPTS = os.getenv("EXPOSE_SOURCE_EXCERPTS", "true").lower() in {"1", "true", "yes"}
-SOURCE_EXCERPT_MAX_CHARS = int(os.getenv("SOURCE_EXCERPT_MAX_CHARS", "100"))
 MAX_FILES_PER_QUERY = int(os.getenv("MAX_FILES_PER_QUERY", "160"))
 MAX_CHUNKS_FOR_MODEL = int(os.getenv("MAX_CHUNKS_FOR_MODEL", "8"))
 MAX_CANDIDATES_FOR_AI = int(os.getenv("MAX_CANDIDATES_FOR_AI", "30"))
 DRIVE_INDEX_TTL_SECONDS = int(os.getenv("DRIVE_INDEX_TTL_SECONDS", "900"))
 OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "45"))
-AI_RETRIEVAL_MODE = os.getenv("AI_RETRIEVAL_MODE", "fast").strip().lower()
+AI_RETRIEVAL_MODE = os.getenv("AI_RETRIEVAL_MODE", "ai").strip().lower()
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "").lower() in {"1", "true", "yes"}
 
 MIME_FOLDER = "application/vnd.google-apps.folder"
@@ -309,7 +308,6 @@ def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
             "hasAppSessionSecret": bool(APP_SESSION_SECRET),
             "exposesSourceMetadata": EXPOSE_SOURCE_METADATA,
             "exposesSourceExcerpts": EXPOSE_SOURCE_EXCERPTS,
-            "sourceExcerptMaxChars": SOURCE_EXCERPT_MAX_CHARS,
             "storesLocalDocuments": False,
             "loadsDotEnv": (ROOT / ".env").exists(),
             "driveIndex": index_status_payload(),
@@ -864,7 +862,7 @@ def public_sources(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "aiTopic": item.get("aiTopic", ""),
             })
         if EXPOSE_SOURCE_EXCERPTS:
-            source["excerpt"] = clean_excerpt(item.get("content", ""), SOURCE_EXCERPT_MAX_CHARS)
+            source["excerpt"] = item.get("content", "")
         sources.append(source)
     return sources
 

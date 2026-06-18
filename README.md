@@ -10,7 +10,7 @@ A private AI mentor prototype built around Brind's notes, quotes, and records. T
 - Uses rough text matching only to narrow candidates, then delegates topic judgment and final source selection to OpenAI.
 - Supports either a manually provided Google access token or an in-app Google OAuth login.
 - Supports an optional app access code for lightweight private sharing.
-- Returns protected numbered citations with a controlled excerpt of up to 100 characters, while hiding Drive IDs, file paths, and full source text.
+- Returns protected numbered citations with the full selected chunk, while hiding Drive IDs and file paths.
 - Generates mentor-style answers inspired by the notes' ideas, rhythm, and reasoning style, while staying honest that it is not Brind.
 - Treats stock, finance, and medical questions as educational analysis only, not as deterministic trading, investment, diagnosis, or medication instructions.
 
@@ -23,7 +23,7 @@ This repository is designed to be safe for a private GitHub repo because it only
 - No `corpus.jsonl`, local vector database, raw-text cache, or sync report is generated or committed.
 - Retrieved Drive text exists only in server memory and expires with the process or cache TTL.
 - OAuth access and refresh tokens are held in server memory only in the current prototype. They are not written to disk.
-- User-facing chat responses do not expose retrieved chunks by default. The model sees sources server-side, but the API returns protected citation labels unless explicitly configured otherwise.
+- User-facing chat responses expose only the chunks selected as citations. Drive IDs and file paths remain hidden unless metadata exposure is explicitly enabled.
 - `.gitignore` excludes virtual environments, caches, logs, `data/`, and other local artifacts.
 
 ## Requirements
@@ -90,7 +90,7 @@ $env:APP_ACCESS_CODE="<optional-app-access-code>"
 $env:OPENAI_API_KEY="<openai-api-key>"
 $env:OPENAI_MODEL="gpt-5.4-mini"
 $env:OPENAI_TIMEOUT_SECONDS="45"
-$env:AI_RETRIEVAL_MODE="fast"
+$env:AI_RETRIEVAL_MODE="ai"
 $env:MAX_CANDIDATES_FOR_AI="30"
 $env:DRIVE_INDEX_TTL_SECONDS="900"
 
@@ -128,8 +128,7 @@ $env:PORT="4175"
 | `APP_SESSION_SECRET` | Stable secret used to sign persistent app-access cookies. Keep this unchanged across deploys. |
 | `ACCESS_MAX_AGE_SECONDS` | App-access cookie lifetime. Default `15552000` seconds (180 days). |
 | `EXPOSE_SOURCE_METADATA` | Optional debug flag. Default `false`; when true, source titles/paths/modified times can be returned to the UI. |
-| `EXPOSE_SOURCE_EXCERPTS` | Controls citation excerpt visibility. Default `true`; excerpts remain bounded by `SOURCE_EXCERPT_MAX_CHARS`. |
-| `SOURCE_EXCERPT_MAX_CHARS` | Maximum visible citation excerpt length, including the ellipsis. Default `100`. |
+| `EXPOSE_SOURCE_EXCERPTS` | Controls citation chunk visibility. Default `true`; selected citation chunks are returned without an additional character cap. |
 | `OPENAI_API_KEY` | OpenAI API key for topic judgment and final answers |
 | `OPENAI_MODEL` | Model used for judgment and answer generation |
 | `OPENAI_TIMEOUT_SECONDS` | Maximum wait for each OpenAI request before falling back, default 45 seconds |
@@ -264,7 +263,7 @@ Response includes:
 
 - `answer`: mentor-style answer
 - `answerMode`: normalized answer mode used by the backend
-- `sources`: protected AI-selected citations with excerpts capped at 100 characters by default; file metadata remains hidden.
+- `sources`: protected AI-selected citations with the full selected chunk by default; file metadata remains hidden.
 - `aiJudgment`: AI-generated topic, confidence, reason, and note coverage level
 - `stats`: scanned file count, text chunk count, skipped file count, and index cache status
 - `skipped`: files that could not be read and the reason
@@ -318,7 +317,7 @@ COOKIE_SECURE=true
 OPENAI_API_KEY=<openai-api-key>
 OPENAI_MODEL=gpt-5.4-mini
 OPENAI_TIMEOUT_SECONDS=45
-AI_RETRIEVAL_MODE=fast
+AI_RETRIEVAL_MODE=ai
 DRIVE_INDEX_TTL_SECONDS=900
 ```
 

@@ -30,7 +30,7 @@ services:
       - key: OPENAI_TIMEOUT_SECONDS
         value: "45"
       - key: AI_RETRIEVAL_MODE
-        value: "fast"
+        value: "ai"
       - key: APP_ACCESS_CODE
         sync: false
       - key: APP_SESSION_SECRET
@@ -53,5 +53,3 @@ services:
         value: "false"
       - key: EXPOSE_SOURCE_EXCERPTS
         value: "true"
-      - key: SOURCE_EXCERPT_MAX_CHARS
-        value: "100"
