@@ -51,5 +51,5 @@ services:
         value: "2592000"
       - key: EXPOSE_SOURCE_METADATA
         value: "false"
-      - key: EXPOSE_SOURCE_EXCERPTS
-        value: "true"
+      - key: CITATION_CONTEXT_CHARS
+        value: "300"

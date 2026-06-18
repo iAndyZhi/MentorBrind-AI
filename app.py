@@ -58,7 +58,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 APP_ACCESS_CODE = os.getenv("APP_ACCESS_CODE", "").strip()
 APP_SESSION_SECRET = os.getenv("APP_SESSION_SECRET", "").strip()
 EXPOSE_SOURCE_METADATA = os.getenv("EXPOSE_SOURCE_METADATA", "").lower() in {"1", "true", "yes"}
-EXPOSE_SOURCE_EXCERPTS = os.getenv("EXPOSE_SOURCE_EXCERPTS", "true").lower() in {"1", "true", "yes"}
+CITATION_CONTEXT_CHARS = int(os.getenv("CITATION_CONTEXT_CHARS", "300"))
 MAX_FILES_PER_QUERY = int(os.getenv("MAX_FILES_PER_QUERY", "160"))
 MAX_CHUNKS_FOR_MODEL = int(os.getenv("MAX_CHUNKS_FOR_MODEL", "8"))
 MAX_CANDIDATES_FOR_AI = int(os.getenv("MAX_CANDIDATES_FOR_AI", "30"))
@@ -307,7 +307,7 @@ def health_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
             "accessMaxAgeSeconds": ACCESS_MAX_AGE_SECONDS,
             "hasAppSessionSecret": bool(APP_SESSION_SECRET),
             "exposesSourceMetadata": EXPOSE_SOURCE_METADATA,
-            "exposesSourceExcerpts": EXPOSE_SOURCE_EXCERPTS,
+            "citationContextChars": CITATION_CONTEXT_CHARS,
             "storesLocalDocuments": False,
             "loadsDotEnv": (ROOT / ".env").exists(),
             "driveIndex": index_status_payload(),
@@ -846,7 +846,26 @@ def fast_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[st
     }
 
 
-def public_sources(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def citation_context(item: dict[str, Any], chunk_lookup: dict[tuple[str, int], str]) -> str:
+    drive_id = str(item.get("driveId", ""))
+    chunk_index = int(item.get("chunkIndex", 0) or 0)
+    current = str(item.get("content", ""))
+    before = chunk_lookup.get((drive_id, chunk_index - 1), "")
+    after = chunk_lookup.get((drive_id, chunk_index + 1), "")
+    sections: list[str] = []
+    if before and CITATION_CONTEXT_CHARS > 0:
+        sections.append(f"...{before[-CITATION_CONTEXT_CHARS:]}")
+    sections.append(current)
+    if after and CITATION_CONTEXT_CHARS > 0:
+        sections.append(f"{after[:CITATION_CONTEXT_CHARS]}...")
+    return "\n\n".join(section for section in sections if section)
+
+
+def public_sources(matches: list[dict[str, Any]], all_chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    chunk_lookup = {
+        (str(chunk.get("driveId", "")), int(chunk.get("chunkIndex", 0) or 0)): str(chunk.get("content", ""))
+        for chunk in all_chunks
+    }
     sources: list[dict[str, Any]] = []
     for index, item in enumerate(matches):
         source = {
@@ -861,8 +880,7 @@ def public_sources(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "chunkIndex": item.get("chunkIndex", 0),
                 "aiTopic": item.get("aiTopic", ""),
             })
-        if EXPOSE_SOURCE_EXCERPTS:
-            source["excerpt"] = item.get("content", "")
+        source["excerpt"] = citation_context(item, chunk_lookup)
         sources.append(source)
     return sources
 
@@ -1102,7 +1120,7 @@ def collect_drive_context(access_token: str, query: str) -> dict[str, Any]:
         "textChunks": len(chunks),
         "skipped": skipped,
         "matches": ai_judgment["selected"],
-        "sources": public_sources(ai_judgment["selected"]),
+        "sources": public_sources(ai_judgment["selected"], chunks),
         "aiJudgment": {
             "topic": ai_judgment["topic"],
             "confidence": ai_judgment["confidence"],
