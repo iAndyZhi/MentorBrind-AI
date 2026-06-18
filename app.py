@@ -59,6 +59,7 @@ APP_ACCESS_CODE = os.getenv("APP_ACCESS_CODE", "").strip()
 APP_SESSION_SECRET = os.getenv("APP_SESSION_SECRET", "").strip()
 EXPOSE_SOURCE_METADATA = os.getenv("EXPOSE_SOURCE_METADATA", "").lower() in {"1", "true", "yes"}
 CITATION_CONTEXT_CHARS = int(os.getenv("CITATION_CONTEXT_CHARS", "300"))
+SOURCE_EXCERPT_CHARS = int(os.getenv("SOURCE_EXCERPT_CHARS", "100"))
 MAX_FILES_PER_QUERY = int(os.getenv("MAX_FILES_PER_QUERY", "160"))
 MAX_CHUNKS_FOR_MODEL = int(os.getenv("MAX_CHUNKS_FOR_MODEL", "8"))
 MAX_CANDIDATES_FOR_AI = int(os.getenv("MAX_CANDIDATES_FOR_AI", "30"))
@@ -880,7 +881,7 @@ def public_sources(matches: list[dict[str, Any]], all_chunks: list[dict[str, Any
                 "chunkIndex": item.get("chunkIndex", 0),
                 "aiTopic": item.get("aiTopic", ""),
             })
-        source["excerpt"] = citation_context(item, chunk_lookup)
+        source["excerpt"] = clean_excerpt(citation_context(item, chunk_lookup), SOURCE_EXCERPT_CHARS)
         sources.append(source)
     return sources
 
