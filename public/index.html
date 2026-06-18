@@ -9,43 +9,44 @@
   <body>
     <main class="shell">
       <aside class="sidebar">
-        <div>
-          <p class="eyebrow">Drive Live / Stateless</p>
+        <div class="brand-block">
+          <p class="eyebrow">LBC Notes / 38C</p>
           <h1>Brind Mentor</h1>
-          <p class="subtle">Reads Google Drive into an in-memory index. Source documents are not written to local storage or committed to the repo.</p>
+          <p class="subtle">Built from historical notes and developed for Cohort 38C. Current knowledge base: 38C, with more cohorts planned. With thanks to everyone who helped organize the LBC notes.</p>
+          <p class="tagline" lang="zh-CN">心安之处是成熙！</p>
         </div>
 
         <section class="panel">
-          <div class="stat">
-            <span>App Access</span>
-            <strong id="accessStatus">-</strong>
-          </div>
-          <div class="stat">
-            <span>Google Access</span>
-            <strong id="tokenStatus">-</strong>
-          </div>
-          <div class="stat">
-            <span>OAuth</span>
-            <strong id="oauthStatus">-</strong>
-          </div>
-          <div class="stat">
-            <span>OpenAI Key</span>
-            <strong id="openaiStatus">-</strong>
-          </div>
-          <div class="stat">
-            <span>Local Corpus</span>
-            <strong id="storageStatus">No</strong>
-          </div>
-          <button id="connectDrive" class="secondary" type="button" hidden>Connect Google Drive</button>
-          <button id="disconnectDrive" class="secondary danger" type="button" hidden>Disconnect</button>
-        </section>
-
-        <section class="panel">
-          <div class="stat">
-            <span>Health</span>
-            <strong id="healthStatus">-</strong>
+          <p class="panel-title">System</p>
+          <div class="system-grid">
+            <div class="mini-stat">
+              <span>App</span>
+              <strong id="accessStatus">-</strong>
+            </div>
+            <div class="mini-stat">
+              <span>Google</span>
+              <strong id="tokenStatus">-</strong>
+            </div>
+            <div class="mini-stat">
+              <span>OAuth</span>
+              <strong id="oauthStatus">-</strong>
+            </div>
+            <div class="mini-stat">
+              <span>OpenAI</span>
+              <strong id="openaiStatus">-</strong>
+            </div>
+            <div class="mini-stat">
+              <span>Local Data</span>
+              <strong id="storageStatus">No</strong>
+            </div>
+            <div class="mini-stat">
+              <span>Health</span>
+              <strong id="healthStatus">-</strong>
+            </div>
           </div>
           <p id="healthMessage" class="panel-note neutral"></p>
+          <button id="connectDrive" class="secondary" type="button" hidden>Connect Google Drive</button>
+          <button id="disconnectDrive" class="secondary danger" type="button" hidden>Disconnect</button>
         </section>
 
         <section id="accessPanel" class="panel" hidden>
@@ -59,37 +60,41 @@
 
         <section class="panel">
           <div class="panel-header">
-            <label>Knowledge Index</label>
+            <p class="panel-title">Knowledge Index</p>
             <button id="refreshIndex" class="icon-button" type="button" title="Refresh Drive index">Refresh</button>
           </div>
-          <div class="stat">
-            <span>Status</span>
-            <strong id="indexStatus">-</strong>
+          <div class="index-primary">
+            <div class="metric">
+              <span>Status</span>
+              <strong id="indexStatus">-</strong>
+            </div>
+            <div class="metric">
+              <span>Refresh In</span>
+              <strong id="indexRefreshIn">-</strong>
+            </div>
           </div>
-          <div class="stat">
-            <span>Refresh In</span>
-            <strong id="indexRefreshIn">-</strong>
+          <div class="index-counts">
+            <div class="metric compact">
+              <span>Files</span>
+              <strong id="scannedCount">-</strong>
+            </div>
+            <div class="metric compact">
+              <span>Chunks</span>
+              <strong id="chunkCount">-</strong>
+            </div>
+            <div class="metric compact">
+              <span>Skipped</span>
+              <strong id="skippedCount">-</strong>
+            </div>
           </div>
-          <div class="stat">
-            <span>Index Delta</span>
+          <div class="index-delta">
+            <span>Last refresh</span>
             <strong id="indexDelta">-</strong>
-          </div>
-          <div class="stat">
-            <span>Scanned</span>
-            <strong id="scannedCount">-</strong>
-          </div>
-          <div class="stat">
-            <span>Text Chunks</span>
-            <strong id="chunkCount">-</strong>
-          </div>
-          <div class="stat">
-            <span>Skipped</span>
-            <strong id="skippedCount">-</strong>
           </div>
         </section>
 
         <section class="panel">
-          <label for="mode">Answer Mode</label>
+          <label class="panel-title" for="mode">Answer Mode</label>
           <select id="mode">
             <option value="mentor">mentor</option>
             <option value="strict citation">strict citation</option>
