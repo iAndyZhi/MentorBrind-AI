@@ -27,7 +27,14 @@ let sourceState = null;
 let accessState = { enabled: false, granted: true };
 let healthState = null;
 const CHAT_TIMEOUT_MS = 75000;
+const SOURCE_EXCERPT_CHARS = 100;
 let indexPollTimer = null;
+
+function truncateText(value, limit) {
+  const characters = Array.from(String(value));
+  if (characters.length <= limit) return characters.join("");
+  return `${characters.slice(0, Math.max(0, limit - 3)).join("").trimEnd()}...`;
+}
 
 function addMessage(role, text, sources = [], skipped = [], aiJudgment = null) {
   const node = document.createElement("div");
@@ -93,7 +100,7 @@ function renderSource(source) {
   if (source.excerpt) {
     const excerpt = document.createElement("p");
     excerpt.className = "source-excerpt";
-    excerpt.textContent = source.excerpt;
+    excerpt.textContent = truncateText(source.excerpt, SOURCE_EXCERPT_CHARS);
     card.appendChild(excerpt);
   }
 
