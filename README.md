@@ -1,357 +1,250 @@
-# MentorBrind-AI
+# Brind Mentor 用户手册
 
-A private AI mentor prototype built around Brind's notes, quotes, and records. The app does not sync Google Drive documents to local storage and does not commit any private corpus to GitHub. The Python backend reads the configured Google Drive folder into an in-memory index, asks AI to judge the topic semantically, selects relevant snippets, and generates an answer from those snippets.
+> 心安之处是成熙！
 
-## Current Capabilities
+Brind Mentor 是一个基于往期 LBC 笔记的私人 AI 导师。项目开发于 38C 期，当前知识库以 38C 笔记为主，今后可以继续加入更多期次。
 
-- Reads a configured Google Drive folder into a process-memory index with automatic expiry, manual refresh, and incremental reuse of unchanged files.
-- Stores no Brind source documents, extracted text, local corpus, or knowledge-base snapshot.
-- Supports Google Docs, TXT, Markdown, PDF, DOCX, RTF, and best-effort legacy `.doc` parsing.
-- Uses rough text matching only to narrow candidates, then delegates topic judgment and final source selection to OpenAI.
-- Supports either a manually provided Google access token or an in-app Google OAuth login.
-- Supports an optional app access code for lightweight private sharing.
-- Returns protected numbered citations centered on the sentence most relevant to the question and limited to 100 characters by default, while hiding Drive IDs and file paths.
-- Generates mentor-style answers inspired by the notes' ideas, rhythm, and reasoning style, while staying honest that it is not Brind.
-- Treats stock, finance, and medical questions as educational analysis only, not as deterministic trading, investment, diagnosis, or medication instructions.
+感谢所有参与整理 LBC 笔记的小伙伴。
 
-## Privacy Design
+它会从知识库中寻找与问题相关的内容，再用导师式的结构帮助你理解结论、机制、限制和风险。它不是 Brind 本人，也不能替代原课程、原始笔记或专业意见。
 
-This repository is designed to be safe for a private GitHub repo because it only contains application code:
+## 快速开始
 
-- `.env` is not committed.
-- Google Drive files are not committed.
-- No `corpus.jsonl`, local vector database, raw-text cache, or sync report is generated or committed.
-- Retrieved Drive text exists only in server memory and expires with the process or cache TTL.
-- OAuth access and refresh tokens are held in server memory only in the current prototype. They are not written to disk.
-- User-facing chat responses expose only the chunks selected as citations. Drive IDs and file paths remain hidden unless metadata exposure is explicitly enabled.
-- `.gitignore` excludes virtual environments, caches, logs, `data/`, and other local artifacts.
+1. 打开管理员提供的 Brind Mentor 网页。
+2. 如果页面要求访问码，输入访问码并点击 **Unlock**。
+3. 查看侧栏：
+   - **Health** 显示 `Ready`，表示服务可以使用。
+   - **Knowledge Index** 显示 `Cached`，表示笔记索引已经准备好。
+   - 如果显示 `Building`，等待索引完成后再提问。
+4. 在 **Answer Mode** 中选择回答方式。
+5. 在页面底部输入问题，点击 **Send**。
 
-## Requirements
+首次启动或知识库刚刷新时，系统可能需要一些时间读取笔记。
 
-- Python 3.11 or newer
-- A Google OAuth access token with read-only Drive permission
-- An OpenAI API key
+## 可以问什么
 
-Recommended Google Drive scope:
+适合的问题包括：
 
-```text
-https://www.googleapis.com/auth/drive.readonly
-```
+- 某只股票背后的行业逻辑、竞争格局和风险。
+- 一种心理现象或关系困境应当如何拆解。
+- AI、商业、教育或社会话题背后的机制。
+- 某个 LBC 课程观点在现实问题中的应用。
+- 对一个判断进行反证，寻找隐藏假设和边界条件。
 
-Default Google Drive folder ID:
+示例：
 
 ```text
-1RbZmNxR8Ga-rnDzckYhoEO8i7FiVigWj
+从笔记的角度分析机器人概念上涨的逻辑，哪些是叙事，哪些是基本面？
 ```
 
-## Preview Locally
+```text
+为什么人在亲密关系中会不断寻求确认？请用初学者能理解的方式解释。
+```
 
-The easiest preview path on Windows is:
+```text
+挑战一下“AI 会替代大部分白领工作”这个判断。
+```
+
+## 怎样获得更好的回答
+
+问题越具体，检索通常越准确。一个好问题最好包含：
+
+- **对象**：你想分析什么。
+- **角度**：你关心机制、风险、估值、心理还是行动建议。
+- **范围**：短期还是长期，个人还是行业，笔记内还是允许适度延伸。
+- **输出要求**：需要结论、分层解释、反方观点或严格引用。
+
+推荐写法：
+
+```text
+对象 + 你真正想判断的问题 + 希望采用的分析方式
+```
+
+不要只输入一个过于宽泛的词，例如“股票”或“爱情”。
+
+## 回答模式
+
+| 模式 | 适合场景 | 回答特点 |
+| --- | --- | --- |
+| `mentor` | 日常分析 | 先给结论，再解释机制、约束和风险。 |
+| `strict citation` | 核对笔记依据 | 重要判断尽量附引用；笔记没有支持时会明确说明。 |
+| `beginner explanation` | 初次接触某个主题 | 减少术语，分层解释，必要时使用简单类比。 |
+| `challenge assumptions` | 检查一个判断是否站得住 | 先找隐藏假设，再给反例、边界条件和最终判断。 |
+
+不确定时，使用默认的 `mentor` 即可。
+
+## 如何阅读回答
+
+### 正文
+
+回答会优先采用笔记中的思路，再在必要时进行推理延伸。如果笔记覆盖不足，系统应当提示你哪些内容来自笔记，哪些属于延伸判断。
+
+回答中的 `[1]`、`[2]` 等编号对应下方的 Source。
+
+### Source
+
+每条 Source：
+
+- 对应回答中的同号引用。
+- 显示与当前问题最相关的句子及少量前后文。
+- 默认最多显示 100 个字符。
+- 不显示 Google Drive 文件路径或私人文件标识。
+
+Source 是核对回答方向的短摘录，不是原笔记全文。如果需要确认完整语境，应回到原始笔记阅读。
+
+### AI topic 与 note coverage
+
+- **AI topic**：系统对当前问题主题的概括。
+- **confidence**：主题判断的置信度。
+- **note coverage**：笔记对问题的覆盖程度，分为 `high`、`medium` 和 `low`。
+
+`note coverage: high` 代表检索匹配较强，但不保证回答一定正确；仍应结合 Source 和原笔记判断。
+
+## 侧栏说明
+
+### System
+
+| 状态 | 含义 |
+| --- | --- |
+| **App: Unlocked / Open** | 已通过访问控制，或当前未启用访问码。 |
+| **Google: Connected** | 系统可以读取已配置的 Google Drive 知识库。 |
+| **OAuth: Available** | 可以使用 Google 登录作为备用连接方式。 |
+| **OpenAI: Configured** | AI 回答功能已配置。 |
+| **Local Data: No** | 原始知识库文件不会保存到应用的本地目录。 |
+| **Health: Ready** | 当前配置可正常使用。 |
+
+### Knowledge Index
+
+| 项目 | 含义 |
+| --- | --- |
+| **Status** | `Cached` 表示可用，`Building` 表示正在更新，`Empty` 表示尚未建立索引。 |
+| **Refresh In** | 距离系统自动检查知识库更新的时间。 |
+| **Files** | 本次索引读取的文件数。 |
+| **Chunks** | 笔记被拆分后的文本片段数。 |
+| **Skipped** | 未能读取的文件数。 |
+| **Last refresh** | 最近一次刷新中读取、复用、变更、移除和跳过的数量。 |
+
+## 更新知识库
+
+当 Google Drive 中的笔记有新增或修改时：
+
+1. 点击侧栏 **Knowledge Index** 右上角的 **Refresh**。
+2. Status 变为 `Building`。
+3. 等待 Status 回到 `Cached`。
+4. 查看 **Last refresh**，确认是否检测到 changed、removed 或 skipped 文件。
+
+刷新在后台进行。刷新期间可以保留页面，但建议等索引完成后再询问刚更新的内容。
+
+## 当 Source 看起来不相关
+
+可能原因包括：
+
+- 问题太宽泛，多个主题使用了相同词语。
+- 笔记对该问题的直接覆盖较少。
+- 系统使用了 `Fast retrieval mode`，只进行快速候选检索。
+- Source 是短摘录，完整语境位于原笔记中。
+
+可以尝试：
+
+1. 把问题改得更具体，加入对象、时间和判断角度。
+2. 使用 `strict citation` 模式重新提问。
+3. 点击 **Refresh**，确保索引是最新的。
+4. 如果页面显示 `Fast retrieval mode`，请管理员启用语义检索模式。
+
+## 隐私与数据边界
+
+- Google Drive 笔记只在服务进程内存中读取和建立索引。
+- 原始笔记、提取文本和知识库快照不会提交到 GitHub。
+- 页面只展示被选中的短 Source，不公开 Drive ID 和文件路径。
+- 应用访问码只是轻量访问控制，不等同于完整的企业身份系统。
+- 不要在问题中输入密码、API Key、身份证件或其他不必要的敏感信息。
+
+## 使用边界
+
+Brind Mentor 提供的是学习与分析辅助：
+
+- 股票和金融内容不构成投资建议。
+- 医疗内容不构成诊断、处方或用药指导。
+- 心理和关系内容不能替代专业咨询或紧急支持。
+- AI 可能误解笔记、遗漏语境或生成错误结论。
+
+涉及资金、健康、安全或法律后果时，请使用可靠的一手资料并咨询合格专业人士。
+
+## 常见问题
+
+### 页面显示 Locked
+
+输入管理员提供的访问码并点击 **Unlock**。如果访问码失效，请联系管理员。
+
+### Health 显示 Setup needed
+
+说明 Google Drive、OpenAI 或服务配置不完整。普通用户无法在页面内修复，请把侧栏提示发给管理员。
+
+### Knowledge Index 一直显示 Building
+
+大型 PDF 或 DOCX 需要更长时间。如果长时间没有完成，刷新页面后查看 Health 提示，并联系管理员检查服务日志。
+
+### 回答很慢
+
+首次建立索引、语义检索和较长问题都会增加等待时间。尽量一次只问一个明确问题。
+
+### 回答引用了笔记中没有的结论
+
+切换到 `strict citation`，缩小问题范围，并检查对应 Source。重要结论应回到原始笔记核对。
+
+### 新笔记没有出现在回答中
+
+点击 **Refresh**，等待状态回到 `Cached` 后重新提问。
+
+### 系统会记住之前的对话吗
+
+当前版本主要按单次问题检索知识库。后续问题最好写明必要背景，不要假设系统完整记住前文。
+
+## 支持的知识库文件
+
+- Google Docs
+- TXT 与 Markdown
+- PDF
+- DOCX
+- RTF
+- 旧版 `.doc`（仅尽力解析，建议转换为 DOCX 或 Google Docs）
+
+扫描版 PDF、图片和手写内容目前不支持 OCR。
+
+## 维护者附录
+
+普通用户不需要阅读本节。
+
+### 本地预览
+
+要求 Python 3.11 或更高版本：
 
 ```powershell
-cd C:\Users\mrand\Documents\Codex\2026-06-11\ai-mentor-google-drive-brind-openai\outputs\MentorBrind-AI
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+Copy-Item .env.example .env
 powershell -ExecutionPolicy Bypass -File .\scripts\preview.ps1
 ```
 
-Then open:
+然后打开 `http://localhost:4173`。
 
-```text
-http://localhost:4173
-```
+### 主要配置
 
-The preview script tries, in order:
+完整配置模板见 `.env.example`，轻量部署模板见 `render.yaml`。最常调整的项目是：
 
-- `PYTHON` environment variable, if set
-- `.venv\Scripts\python.exe`
-- `py`
-- `python`
-- Codex Desktop's bundled Python runtime
-
-Edit `.env` with your local credentials when you want live chat. If you only want to preview the UI, credentials are not required. Chat requests require Google Drive access and, for AI answers, an OpenAI key.
-
-The app automatically loads `.env` from the project root. For local preview, values in `.env` override same-named shell variables so stale terminal settings do not silently win.
-
-## Manual Run
-
-```powershell
-cd C:\Users\mrand\Documents\Codex\2026-06-11\ai-mentor-google-drive-brind-openai\outputs\MentorBrind-AI
-
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-
-$env:GOOGLE_DRIVE_FOLDER_ID="1RbZmNxR8Ga-rnDzckYhoEO8i7FiVigWj"
-$env:GOOGLE_ACCESS_TOKEN="<google-oauth-access-token>"
-$env:GOOGLE_CLIENT_ID="<google-oauth-client-id>"
-$env:GOOGLE_CLIENT_SECRET="<google-oauth-client-secret>"
-$env:GOOGLE_REDIRECT_URI="http://localhost:4173/api/auth/google/callback"
-$env:SESSION_MAX_AGE_SECONDS="2592000"
-$env:APP_ACCESS_CODE="<optional-app-access-code>"
-$env:OPENAI_API_KEY="<openai-api-key>"
-$env:OPENAI_MODEL="gpt-5.4-mini"
-$env:OPENAI_TIMEOUT_SECONDS="45"
-$env:AI_RETRIEVAL_MODE="ai"
-$env:MAX_CANDIDATES_FOR_AI="30"
-$env:DRIVE_INDEX_TTL_SECONDS="900"
-
-.\.venv\Scripts\python.exe app.py
-```
-
-If your system does not have `python` or `py` on PATH, install Python 3.11+ or set `PYTHON` to a full `python.exe` path before using `scripts\preview.ps1`.
-
-Open:
-
-```text
-http://localhost:4173
-```
-
-If the port is busy:
-
-```powershell
-$env:PORT="4175"
-.\.venv\Scripts\python app.py
-```
-
-## Environment Variables
-
-| Variable | Purpose |
+| 变量 | 用途 |
 | --- | --- |
-| `GOOGLE_DRIVE_FOLDER_ID` | Google Drive folder ID to read from |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Optional service account JSON credentials. Recommended for hosted use so users do not need Google OAuth. |
-| `GOOGLE_SERVICE_ACCOUNT_JSON_B64` | Optional base64-encoded service account JSON. Use this if the host UI does not handle multiline JSON well. |
-| `GOOGLE_ACCESS_TOKEN` | Optional manual Google OAuth access token with Drive read permission |
-| `GOOGLE_CLIENT_ID` | Optional Google OAuth client ID for in-app sign-in |
-| `GOOGLE_CLIENT_SECRET` | Optional Google OAuth client secret for in-app sign-in |
-| `GOOGLE_REDIRECT_URI` | OAuth callback URL, default `http://localhost:4173/api/auth/google/callback` |
-| `SESSION_MAX_AGE_SECONDS` | In-memory OAuth session lifetime, default 30 days |
-| `APP_ACCESS_CODE` | Optional lightweight app passcode. If set, users must unlock the app before chat or Google OAuth. |
-| `APP_SESSION_SECRET` | Stable secret used to sign persistent app-access cookies. Keep this unchanged across deploys. |
-| `ACCESS_MAX_AGE_SECONDS` | App-access cookie lifetime. Default `15552000` seconds (180 days). |
-| `EXPOSE_SOURCE_METADATA` | Optional debug flag. Default `false`; when true, source titles/paths/modified times can be returned to the UI. |
-| `CITATION_CONTEXT_CHARS` | Number of characters appended from the previous and next chunk around each selected citation. Default `300` per side. |
-| `SOURCE_EXCERPT_CHARS` | Maximum characters returned for each query-centered source excerpt. Default `100`. |
-| `OPENAI_API_KEY` | OpenAI API key for topic judgment and final answers |
-| `OPENAI_MODEL` | Model used for judgment and answer generation |
-| `OPENAI_TIMEOUT_SECONDS` | Maximum wait for each OpenAI request before falling back, default 45 seconds |
-| `AI_RETRIEVAL_MODE` | `fast` skips the separate AI retrieval judge for lower latency; `ai` adds a semantic judge call before final answering |
-| `COOKIE_SECURE` | Set `true` on HTTPS deployments so session cookies use the Secure flag. Keep `false` for local HTTP preview. |
-| `HOST` | Bind host. Use `127.0.0.1` locally and `0.0.0.0` on hosted platforms. |
-| `PORT` | Local server port, default `4173` |
-| `MAX_FILES_PER_QUERY` | Maximum Drive files scanned while building the in-memory index |
-| `MAX_CHUNKS_FOR_MODEL` | Maximum snippets passed into the final answer prompt |
-| `MAX_CANDIDATES_FOR_AI` | Candidate snippets passed to AI for semantic judging |
-| `DRIVE_INDEX_TTL_SECONDS` | In-memory Drive index lifetime before automatic rebuild, default 15 minutes |
+| `AI_RETRIEVAL_MODE` | `ai` 使用语义筛选；`fast` 延迟更低但相关性较弱。 |
+| `SOURCE_EXCERPT_CHARS` | Source 摘要的最大字符数，默认 100。 |
+| `DRIVE_INDEX_TTL_SECONDS` | 自动重新检查知识库的间隔。 |
+| `OPENAI_MODEL` | 回答与语义判断使用的模型。 |
 
-## Retrieval Flow
+### 安全要求
 
-The backend keeps a Drive-derived index in process memory:
-
-1. The first chat request or manual refresh lists files in the configured folder.
-2. Supported files are exported or parsed in memory.
-3. The in-memory index is reused until `DRIVE_INDEX_TTL_SECONDS` expires.
-4. On refresh or TTL expiry, Drive is listed again, but unchanged files reuse their existing in-memory chunks.
-5. Rough text matching reduces the candidate snippet set.
-6. In `fast` mode, the top candidates go directly into the final answer prompt. In `ai` mode, OpenAI first semantically judges and narrows candidates.
-7. The answer is generated from the selected snippets.
-
-Use the sidebar **Refresh** button or `POST /api/index/refresh` to pick up Google Drive changes immediately. Refresh runs in a background thread so hosted platforms do not time out while PDFs and DOCX files are parsed. The sidebar shows **Building** during indexing and reports how many files were read, reused, changed, removed, or skipped. Otherwise, updates are picked up automatically after the TTL.
-
-The rough match is only a latency and token-cost reducer. It is not treated as a topic classifier. In `fast` mode the app avoids a separate topic label and lets the final model reason over selected context. In `ai` mode, topic judgment is semantic and no longer depends on hard-coded keyword rules.
-
-Every answer uses the notes as its primary reasoning frame before extending outward. When direct note overlap is low, the backend prepends a disclosure and requires the model to distinguish note-supported claims from reasoned extensions.
-
-If `OPENAI_API_KEY` is not configured, the app clearly reports that AI topic judgment is disabled instead of inventing a topic label.
-
-## Google Drive Access
-
-For hosted use, prefer a Google service account:
-
-1. Create a Google Cloud service account.
-2. Create a JSON key for that service account.
-3. Share the target Google Drive folder with the service account `client_email` as a viewer.
-4. Put the full JSON key into `GOOGLE_SERVICE_ACCOUNT_JSON`, or a base64-encoded copy into `GOOGLE_SERVICE_ACCOUNT_JSON_B64`.
-
-When service account credentials are configured, the backend reads Drive automatically after users unlock the app. Users do not need to click **Connect Google Drive**.
-
-For Render, `GOOGLE_SERVICE_ACCOUNT_JSON_B64` is usually easier because it avoids multiline secret formatting issues. On Windows PowerShell:
-
-```powershell
-[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content .\service-account.json -Raw)))
-```
-
-## Google OAuth Login
-
-For local development or fallback use, you can either paste a short-lived `GOOGLE_ACCESS_TOKEN` into the environment or configure Google OAuth and use the in-app **Connect Google Drive** button.
-
-To use OAuth:
-
-1. Create an OAuth client in Google Cloud.
-2. Add this authorized redirect URI:
-
-```text
-http://localhost:4173/api/auth/google/callback
-```
-
-3. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
-4. Start the app and click **Connect Google Drive** in the sidebar.
-
-In this prototype, OAuth tokens are kept in process memory and associated with an HttpOnly session cookie. The app refreshes expired Google access tokens in memory when a refresh token is available. Restarting the server clears all sessions and requires signing in again.
-
-## Optional App Access Code
-
-Set `APP_ACCESS_CODE` to add a simple passcode gate for early private sharing. When it is set, users must unlock the app before they can start Google OAuth or send chat requests.
-
-Successful unlocks use an HttpOnly signed cookie and do not depend on process memory, so Render restarts and free-tier sleep do not force users to unlock again. The default cookie lifetime is 180 days. Set a stable `APP_SESSION_SECRET`; changing it invalidates all existing access cookies.
-
-This remains a lightweight passcode gate. It is useful for a private prototype, but it is not a replacement for production user accounts, audit logs, rate limits, or a proper authorization system.
-
-## Supported File Types
-
-Currently supported:
-
-- Google Docs, exported as plain text
-- `.txt`
-- `.md` / `.markdown`
-- `.pdf`, parsed in memory with `pypdf`
-- `.docx`, parsed in memory through zip/xml
-- `.rtf`, parsed with a lightweight text cleaner
-- `.doc`, best-effort text recovery
-
-Limitations:
-
-- Images, handwriting, and scanned PDFs need OCR, which is not implemented yet.
-- Legacy `.doc` parsing is unreliable; convert to `.docx` or Google Docs when possible.
-- The index is process-memory only. Restarting the server clears it.
-- Google Drive updates are visible after manual refresh or after `DRIVE_INDEX_TTL_SECONDS` expires.
-
-## API
-
-### `GET /api/health`
-
-Returns non-secret runtime diagnostics, including missing configuration, recommended setup actions, uptime, and whether the app is reading from `.env`.
-
-### `GET /api/sources`
-
-Returns service status, including whether Google and OpenAI credentials are configured, whether local document storage is used, and which file types are supported.
-
-### `GET /api/index/status`
-
-Returns non-secret in-memory index status, including whether the index is cached, file/chunk counts, TTL, last refresh age, and incremental refresh stats.
-
-### `POST /api/index/refresh`
-
-Starts a background Google Drive listing and incrementally rebuilds the process-memory index. Unchanged files reuse existing in-memory chunks. Poll `GET /api/index/status` until `refreshRunning` is `false` and `cached` is `true`.
-
-### `POST /api/chat`
-
-Request:
-
-```json
-{
-  "message": "Huachen Equipment stock logic",
-  "mode": "mentor"
-}
-```
-
-Supported answer modes:
-
-- `mentor`: conclusion first, then Brind-style mechanism analysis.
-- `strict citation`: every key judgment needs a citation; unsupported claims must say `Not found in the notes`.
-- `beginner explanation`: fewer technical terms, layered explanation, and a simple analogy when useful.
-- `challenge assumptions`: hidden assumptions first, then counterexamples, risk boundaries, and final judgment.
-
-Response includes:
-
-- `answer`: mentor-style answer
-- `answerMode`: normalized answer mode used by the backend
-- `sources`: protected AI-selected citations centered on the most query-relevant sentence and limited to `SOURCE_EXCERPT_CHARS`; file metadata remains hidden.
-- `aiJudgment`: AI-generated topic, confidence, reason, and note coverage level
-- `stats`: scanned file count, text chunk count, skipped file count, and index cache status
-- `skipped`: files that could not be read and the reason
-
-## GitHub Safety Checklist
-
-Before committing:
-
-```powershell
-git status
-```
-
-Do not commit:
+不要提交以下内容：
 
 - `.env`
-- `.venv/`
-- `data/`
-- any downloaded Drive folder
-- any `corpus.jsonl`
-- any extracted Brind source text
-- logs or screenshots containing private content
+- Google 服务账号 JSON
+- OAuth Token 或 OpenAI API Key
+- 下载后的 Drive 文件
+- 提取文本、知识库快照或包含私人笔记的日志和截图
 
-## Deployment Notes
-
-The app can be deployed as a single Python web service. It uses the platform-provided `PORT` and should bind to `HOST=0.0.0.0` in production.
-
-### Render Quick Start
-
-1. Push this repository to GitHub.
-2. In Render, create a new **Web Service** from the GitHub repo, or use the included `render.yaml` as a blueprint.
-3. Use:
-
-```text
-Build Command: pip install -r requirements.txt
-Start Command: python app.py
-Health Check Path: /api/health
-Instance Type: Free
-```
-
-4. Set these environment variables in Render:
-
-```text
-HOST=0.0.0.0
-APP_BASE_URL=https://your-render-service.onrender.com
-GOOGLE_DRIVE_FOLDER_ID=1RbZmNxR8Ga-rnDzckYhoEO8i7FiVigWj
-GOOGLE_SERVICE_ACCOUNT_JSON_B64=<base64-service-account-json>
-APP_ACCESS_CODE=<private-app-passcode>
-APP_SESSION_SECRET=<stable-random-secret>
-ACCESS_MAX_AGE_SECONDS=15552000
-COOKIE_SECURE=true
-OPENAI_API_KEY=<openai-api-key>
-OPENAI_MODEL=gpt-5.4-mini
-OPENAI_TIMEOUT_SECONDS=45
-AI_RETRIEVAL_MODE=ai
-DRIVE_INDEX_TTL_SECONDS=900
-```
-
-If you use Google OAuth fallback instead of service account credentials, also set:
-
-```text
-GOOGLE_CLIENT_ID=<google-oauth-client-id>
-GOOGLE_CLIENT_SECRET=<google-oauth-client-secret>
-GOOGLE_REDIRECT_URI=https://your-render-service.onrender.com/api/auth/google/callback
-```
-
-5. If using Google OAuth fallback, add this authorized redirect URI in Google Cloud Console:
-
-```text
-https://your-render-service.onrender.com/api/auth/google/callback
-```
-
-6. If the OAuth app is still in Testing mode, add every Google account that needs access as a test user.
-7. Deploy, open the Render URL, enter the app access code once, then refresh the Drive index. With service account credentials, no Google login is needed.
-
-### Production Gaps
-
-The current hosted prototype still keeps OAuth sessions and the Drive index in process memory. That is acceptable for a private test deployment, but a production version should move token storage to a secure secret store or encrypted database:
-
-1. The user signs in with Google.
-2. The server stores the refresh token securely.
-3. The server requests short-lived access tokens as needed.
-4. The server maintains either an in-memory or secure remote index.
-5. Private notes are never written to GitHub or public logs.
-
-## Roadmap
-
-- Add OCR support for scanned PDFs and images.
-- Add an optional secure remote index for better latency on large Drive folders.
-- Add user access controls so friends can use the app without direct access to raw Drive files.
-- Improve citation display with clearer file and snippet references.
+代码可以进入 GitHub，私人知识库不可以。
