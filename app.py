@@ -722,6 +722,10 @@ def relevant_excerpt(text: str, query: str, limit: int = 100) -> str:
     return f"{'...' if prefix else ''}{excerpt}{'...' if suffix else ''}"
 
 
+def normalize_source_evidence(value: Any) -> str:
+    return clean_excerpt(str(value or ""), SOURCE_EXCERPT_CHARS)
+
+
 def make_chunk(file: dict[str, Any], content: str, index: int) -> dict[str, Any]:
     return {
         "id": f"{file['id']}#{index}",
@@ -936,6 +940,34 @@ def public_sources(matches: list[dict[str, Any]], all_chunks: list[dict[str, Any
         source["excerpt"] = relevant_excerpt(citation_context(item, chunk_lookup), query, SOURCE_EXCERPT_CHARS)
         sources.append(source)
     return sources
+
+
+def apply_source_evidence(sources: list[dict[str, Any]], evidence_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    evidence_by_citation: dict[int, str] = {}
+    for item in evidence_items:
+        try:
+            citation = int(item.get("citation", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        evidence = normalize_source_evidence(item.get("evidence") or item.get("supports") or item.get("summary"))
+        if citation > 0 and evidence:
+            evidence_by_citation[citation] = evidence
+
+    if not evidence_by_citation:
+        return sources
+
+    updated: list[dict[str, Any]] = []
+    for source in sources:
+        clone = dict(source)
+        try:
+            citation = int(clone.get("citation", 0) or 0)
+        except (TypeError, ValueError):
+            citation = 0
+        if citation in evidence_by_citation:
+            clone["excerpt"] = evidence_by_citation[citation]
+            clone["evidenceBound"] = True
+        updated.append(clone)
+    return updated
 
 
 def index_status_payload() -> dict[str, Any]:
@@ -1240,6 +1272,10 @@ def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: 
         "5. Do not reveal raw source passages or long quotes. Synthesize the answer from the sources instead.",
         "6. If the user asks for raw notes, full documents, exact transcripts, hidden file names, Drive paths, or bulk extraction, refuse that part and offer a concise synthesized summary instead.",
         "7. If the notes are incomplete, say so briefly, then give a cautious reasoned extension labeled as analysis rather than as a direct statement from Brind.",
+        "8. Return JSON only. The answer field must contain the user-facing answer. The source_evidence field must explain what each cited source actually supports.",
+        "9. For every source number cited in answer, add one source_evidence item with citation and evidence. Evidence must be a concise paraphrase, not a long quote, and must match the cited claim.",
+        "10. Do not cite a source unless its source_evidence can clearly support the cited claim.",
+        "JSON schema: {\"answer\":\"...\",\"source_evidence\":[{\"citation\":1,\"evidence\":\"what this source supports, <=100 Chinese characters or <=55 English words\"}]}",
         "",
         "Answer mode rules:",
         *ANSWER_MODE_PROMPTS[mode],
@@ -1253,10 +1289,23 @@ def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: 
     ])
 
 
-def openai_answer(query: str, matches: list[dict[str, Any]], ai_judgment: dict[str, Any], answer_mode: str = "mentor") -> str | None:
+def openai_answer(query: str, matches: list[dict[str, Any]], ai_judgment: dict[str, Any], answer_mode: str = "mentor") -> dict[str, Any] | None:
     if not OPENAI_API_KEY:
         return None
-    return openai_request(build_answer_prompt(query, matches, ai_judgment, answer_mode))
+    raw = openai_request(build_answer_prompt(query, matches, ai_judgment, answer_mode))
+    try:
+        parsed = parse_json_object(raw)
+    except Exception:
+        return {"answer": raw, "source_evidence": []}
+
+    answer = str(parsed.get("answer") or "").strip()
+    evidence = parsed.get("source_evidence") or parsed.get("sources") or []
+    if not isinstance(evidence, list):
+        evidence = []
+    return {
+        "answer": answer or raw,
+        "source_evidence": evidence,
+    }
 
 
 def serve_static(handler: BaseHTTPRequestHandler, request_path: str) -> None:
@@ -1368,9 +1417,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             context = collect_drive_context(access_token, message)
             answer_error = ""
+            source_evidence: list[dict[str, Any]] = []
             answer_started_at = time.perf_counter()
             try:
-                answer = openai_answer(message, context["matches"], context["aiJudgment"], answer_mode)
+                answer_result = openai_answer(message, context["matches"], context["aiJudgment"], answer_mode)
+                answer = answer_result.get("answer") if answer_result else None
+                source_evidence = answer_result.get("source_evidence", []) if answer_result else []
             except Exception as exc:
                 answer_error = str(exc)
                 answer = None
@@ -1385,6 +1437,7 @@ class Handler(BaseHTTPRequestHandler):
                 if answer_error:
                     answer = f"{answer}\n\nAnswer generation error: {answer_error}"
             answer = add_low_coverage_notice(answer, message, context["aiJudgment"])
+            sources = apply_source_evidence(context["sources"], source_evidence)
             timings = {
                 **context["timings"],
                 "answerMs": answer_ms,
@@ -1392,7 +1445,7 @@ class Handler(BaseHTTPRequestHandler):
             }
             json_response(self, {
                 "answer": answer,
-                "sources": context["sources"],
+                "sources": sources,
                 "skipped": context["skipped"][:20],
                 "aiJudgment": context["aiJudgment"],
                 "answerMode": answer_mode,
