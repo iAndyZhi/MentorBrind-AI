@@ -49,6 +49,30 @@ class MentorChatIndexingTests(unittest.TestCase):
 
         self.assertEqual(app.split_into_chunks(FILE, content), [])
 
+    def test_short_casual_reply_is_not_indexed(self) -> None:
+        content = """2025-09-22 10:00:00 'Alice'
+明白了吗？
+
+2025-09-22 10:01:00 'Brind'
+哈哈
+"""
+
+        self.assertEqual(app.split_into_chunks(FILE, content), [])
+
+    def test_quoted_member_text_is_removed_from_mentor_evidence(self) -> None:
+        content = """2025-09-22 10:00:00 'Alice'
+这个判断对吗？
+
+2025-09-22 10:01:00 'Brind'
+先检查前提，再判断结论是否成立。[引用 Alice：我认为一定会上涨]
+"""
+
+        chunks = app.split_into_chunks(FILE, content)
+
+        self.assertEqual(len(chunks), 1)
+        self.assertIn("先检查前提", chunks[0]["content"])
+        self.assertNotIn("一定会上涨", chunks[0]["content"])
+
     def test_regular_notes_keep_standard_chunking(self) -> None:
         note_file = {"id": "note", "name": "note.txt", "path": "Knowledge/note.txt"}
         chunks = app.split_into_chunks(note_file, "第一段笔记。\n\n第二段笔记。")
