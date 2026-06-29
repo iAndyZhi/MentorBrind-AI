@@ -67,6 +67,17 @@ DRIVE_INDEX_TTL_SECONDS = int(os.getenv("DRIVE_INDEX_TTL_SECONDS", "900"))
 OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "45"))
 AI_RETRIEVAL_MODE = os.getenv("AI_RETRIEVAL_MODE", "ai").strip().lower()
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "").lower() in {"1", "true", "yes"}
+MENTOR_CHAT_ALIASES = tuple(
+    alias.strip()
+    for alias in os.getenv("MENTOR_CHAT_ALIASES", "Brind,张成熙,Brind张成熙").split(",")
+    if alias.strip()
+)
+MENTOR_CHAT_ALIAS_KEYS = frozenset(
+    re.sub(r"[^\w\u4e00-\u9fff]+", "", alias, flags=re.UNICODE).casefold()
+    for alias in MENTOR_CHAT_ALIASES
+)
+CHAT_CONTEXT_MESSAGES = max(0, int(os.getenv("CHAT_CONTEXT_MESSAGES", "2")))
+CHAT_MENTOR_CHUNK_CHARS = max(400, int(os.getenv("CHAT_MENTOR_CHUNK_CHARS", "1600")))
 
 MIME_FOLDER = "application/vnd.google-apps.folder"
 MIME_DOC = "application/vnd.google-apps.document"
@@ -75,6 +86,10 @@ MIME_PDF = "application/pdf"
 MIME_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 MIME_DOC_LEGACY = "application/msword"
 MIME_RTF = "application/rtf"
+CHAT_MESSAGE_HEADER_RE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+'([^'\r\n]+)'\s*$",
+    flags=re.MULTILINE,
+)
 SESSION_COOKIE = "mentorbrind_session"
 ACCESS_COOKIE = "mentorbrind_access"
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
@@ -739,10 +754,120 @@ def make_chunk(file: dict[str, Any], content: str, index: int) -> dict[str, Any]
     }
 
 
+def normalize_speaker_name(value: str) -> str:
+    return re.sub(r"[^\w\u4e00-\u9fff]+", "", value, flags=re.UNICODE).casefold()
+
+
+def is_mentor_speaker(value: str) -> bool:
+    normalized = normalize_speaker_name(value)
+    return bool(normalized) and normalized in MENTOR_CHAT_ALIAS_KEYS
+
+
+def parse_chat_messages(content: str) -> list[dict[str, str]]:
+    matches = list(CHAT_MESSAGE_HEADER_RE.finditer(content))
+    messages: list[dict[str, str]] = []
+    for position, match in enumerate(matches):
+        body_start = match.end()
+        body_end = matches[position + 1].start() if position + 1 < len(matches) else len(content)
+        body = content[body_start:body_end].strip()
+        if body:
+            messages.append({
+                "timestamp": match.group(1),
+                "speaker": match.group(2).strip(),
+                "text": body,
+            })
+    return messages
+
+
+def is_chat_history_file(file: dict[str, Any], content: str) -> bool:
+    path = f"{file.get('path', '')}/{file.get('name', '')}".replace("\\", "/").casefold()
+    if "chat history" in path or "chat_history" in path or "聊天记录" in path:
+        return True
+    if not str(file.get("name", "")).casefold().endswith(".txt"):
+        return False
+    return len(CHAT_MESSAGE_HEADER_RE.findall(content[:100_000])) >= 3
+
+
+def useful_chat_text(value: str) -> str:
+    text = re.sub(r"\n{3,}", "\n\n", value.replace("\r\n", "\n")).strip()
+    placeholders = re.sub(
+        r"\[(?:图片|视频|动画表情|表情|语音|文件|链接|image|video|sticker|audio|file|link)\]",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text if placeholders.strip() else ""
+
+
+def make_mentor_chat_chunk(
+    file: dict[str, Any],
+    mentor_messages: list[dict[str, str]],
+    context_messages: list[dict[str, str]],
+    index: int,
+) -> dict[str, Any]:
+    mentor_content = "\n\n".join(
+        f"{message['speaker']}（导师，{message['timestamp']}）：{message['text']}"
+        for message in mentor_messages
+    )
+    context_content = "\n".join(
+        f"{message['speaker']}（群聊上下文）：{clean_excerpt(message['text'], 240)}"
+        for message in context_messages
+    )
+    chunk = make_chunk(file, mentor_content, index)
+    chunk.update({
+        "sourceType": "mentor_chat",
+        "mentorSpeaker": mentor_messages[0]["speaker"],
+        "chatContext": context_content,
+    })
+    return chunk
+
+
+def split_mentor_chat_into_chunks(file: dict[str, Any], content: str) -> list[dict[str, Any]]:
+    messages = parse_chat_messages(content)
+    chunks: list[dict[str, Any]] = []
+    recent_context: list[dict[str, str]] = []
+    pending_context: list[dict[str, str]] = []
+    mentor_buffer: list[dict[str, str]] = []
+
+    def flush() -> None:
+        nonlocal mentor_buffer, pending_context
+        if mentor_buffer:
+            chunks.append(make_mentor_chat_chunk(file, mentor_buffer, pending_context, len(chunks)))
+        mentor_buffer = []
+        pending_context = []
+
+    for message in messages:
+        text = useful_chat_text(message["text"])
+        if not text:
+            continue
+        cleaned = {**message, "text": text}
+        if not is_mentor_speaker(cleaned["speaker"]):
+            flush()
+            if CHAT_CONTEXT_MESSAGES:
+                recent_context = [*recent_context, cleaned][-CHAT_CONTEXT_MESSAGES:]
+            continue
+
+        formatted_length = len(cleaned["speaker"]) + len(cleaned["timestamp"]) + len(text) + 8
+        buffered_length = sum(
+            len(item["speaker"]) + len(item["timestamp"]) + len(item["text"]) + 8
+            for item in mentor_buffer
+        )
+        if mentor_buffer and buffered_length + formatted_length > CHAT_MENTOR_CHUNK_CHARS:
+            flush()
+        if not mentor_buffer:
+            pending_context = list(recent_context)
+        mentor_buffer.append(cleaned)
+
+    flush()
+    return chunks
+
+
 def split_into_chunks(file: dict[str, Any], content: str) -> list[dict[str, Any]]:
     normalized = re.sub(r"\n{3,}", "\n\n", content.replace("\r\n", "\n")).strip()
     if not normalized:
         return []
+    if is_chat_history_file(file, normalized):
+        return split_mentor_chat_into_chunks(file, normalized)
 
     chunks: list[dict[str, Any]] = []
     buffer = ""
@@ -775,9 +900,12 @@ def rough_rank_chunks(query: str, chunks: list[dict[str, Any]], limit: int = MAX
     scored = []
     for item in chunks:
         haystack = f"{item.get('title', '')} {item.get('content', '')}".lower()
+        context_haystack = str(item.get("chatContext", "")).lower()
         term_score = sum(2 for term in terms if term in haystack)
+        context_score = sum(1 for term in terms if term in context_haystack)
         phrase_score = 8 if raw_query and raw_query in haystack else 0
-        score = term_score + phrase_score
+        context_phrase_score = 2 if raw_query and raw_query in context_haystack else 0
+        score = term_score + context_score + phrase_score + context_phrase_score
         if score > 0:
             scored.append({**item, "roughScore": score})
     if not scored:
@@ -847,6 +975,8 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
             "title": item["title"],
             "source": item["source"],
             "excerpt": item["content"][:900],
+            "source_type": item.get("sourceType", "document"),
+            "chat_context_only": str(item.get("chatContext", ""))[:500],
         }
         for item in candidates
     ]
@@ -854,6 +984,7 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
         "You are a retrieval judge for a private knowledge base.",
         "Do not classify the user topic by hard-coded keywords. Judge semantically from the user intent and candidate snippets.",
         "Pick up to 8 snippets that can truly help answer the user question, and produce a natural-language topic label.",
+        "For mentor_chat snippets, excerpt contains Brind's statements. chat_context_only contains other members' nearby messages and may help identify the question, but it is not evidence of Brind's view.",
         "If none of the candidates are relevant, return an empty selected_ids array.",
         "Return JSON only, no Markdown.",
         "Schema: {\"topic\":\"...\",\"confidence\":\"high|medium|low\",\"selected_ids\":[\"...\"],\"reason\":\"...\"}",
@@ -1255,6 +1386,12 @@ def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: 
             f"[{index + 1}] {item.get('title', 'Untitled')}",
             f"source: {item.get('source', 'unknown')}",
             f"modified: {item.get('modifiedTime', 'unknown')}",
+            f"source type: {item.get('sourceType', 'document')}",
+            *(
+                [f"other members' chat context (context only, not Brind evidence):\n{item.get('chatContext', '')}"]
+                if item.get("chatContext") else []
+            ),
+            "Brind/mentor evidence:" if item.get("sourceType") == "mentor_chat" else "Document evidence:",
             item.get("content", ""),
         ])
         for index, item in enumerate(matches)
@@ -1275,6 +1412,7 @@ def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: 
         "8. Return JSON only. The answer field must contain the user-facing answer. The source_evidence field must explain what each cited source actually supports.",
         "9. For every source number cited in answer, add one source_evidence item with citation and evidence. Evidence must be a concise paraphrase, not a long quote, and must match the cited claim.",
         "10. Do not cite a source unless its source_evidence can clearly support the cited claim.",
+        "11. In mentor_chat sources, only the Brind/mentor evidence is authoritative. Other members' chat context may clarify the question but must never be presented or cited as Brind's opinion.",
         "JSON schema: {\"answer\":\"...\",\"source_evidence\":[{\"citation\":1,\"evidence\":\"what this source supports, <=100 Chinese characters or <=55 English words\"}]}",
         "",
         "Answer mode rules:",

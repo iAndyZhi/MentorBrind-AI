@@ -242,6 +242,17 @@ Brind Mentor 提供的是学习与分析辅助：
 
 扫描版 PDF、图片和手写内容目前不支持 OCR。
 
+### 群聊记录的导师优先索引
+
+放在 Google Drive `chat history` 文件夹中的 TXT 群聊导出会使用专用解析逻辑：
+
+- 只有 Brind 的发言进入知识正文并作为回答依据。
+- Brind 发言前最多两条群友消息仅作为提问语境，不能被引用为 Brind 的观点。
+- 图片、视频、表情等没有文字内容的占位消息不会进入索引。
+- 默认识别 `Brind`、`张成熙` 和 `Brind张成熙`；如群昵称不同，可通过 `MENTOR_CHAT_ALIASES` 增加别名。
+
+上传或替换聊天记录后，点击侧栏 **Refresh**，等待索引状态恢复为 `Cached`。
+
 ## 维护者附录
 
 普通用户不需要阅读本节。
@@ -267,6 +278,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\preview.ps1
 | `SOURCE_EXCERPT_CHARS` | Source 摘要的最大字符数，默认 100 |
 | `DRIVE_INDEX_TTL_SECONDS` | 自动重新检查知识库的间隔 |
 | `OPENAI_MODEL` | 回答与语义判断使用的模型 |
+| `MENTOR_CHAT_ALIASES` | 群聊中导师昵称的英文逗号分隔列表 |
+| `CHAT_CONTEXT_MESSAGES` | 每个导师发言块保留的前置群友消息数，默认 2 |
+| `CHAT_MENTOR_CHUNK_CHARS` | 连续导师发言的目标分块长度，默认 1600 |
 
 ### 安全要求
 
