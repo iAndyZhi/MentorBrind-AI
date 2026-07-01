@@ -249,9 +249,20 @@ Brind Mentor 提供的是学习与分析辅助：
 - 只有 Brind 的发言进入知识正文并作为回答依据。
 - Brind 发言前最多两条群友消息仅作为提问语境，不能被引用为 Brind 的观点。
 - 图片、视频、表情等没有文字内容的占位消息不会进入索引。
+- 过短寒暄、单独回应和转贴引用不会作为导师知识块。
 - 默认识别 `Brind`、`张成熙` 和 `Brind张成熙`；如群昵称不同，可通过 `MENTOR_CHAT_ALIASES` 增加别名。
 
+整理笔记是主知识库，群聊记录是补充知识库。候选检索默认给整理笔记保留 20 个席位、群聊保留 10 个席位；最终回答在存在相关笔记时最多采用 3 个群聊来源，避免聊天记录因数量庞大而淹没整理笔记。
+
 上传或替换聊天记录后，点击侧栏 **Refresh**，等待索引状态恢复为 `Cached`。
+
+### 私有术语配置
+
+系统支持通过 `CODED_TERM_GROUPS_JSON` 环境变量配置正式名称与代称的双向检索。具体对应关系属于部署配置，不写入代码、README 或 Git 历史。例如：
+
+```json
+{"canonical term":["private alias 1","private alias 2"]}
+```
 
 ## 维护者附录
 
@@ -281,6 +292,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\preview.ps1
 | `MENTOR_CHAT_ALIASES` | 群聊中导师昵称的英文逗号分隔列表 |
 | `CHAT_CONTEXT_MESSAGES` | 每个导师发言块保留的前置群友消息数，默认 2 |
 | `CHAT_MENTOR_CHUNK_CHARS` | 连续导师发言的目标分块长度，默认 1600 |
+| `CHAT_MIN_MENTOR_CHUNK_CHARS` | 群聊导师知识块的最少有效字符数，默认 12 |
+| `MAX_CHAT_CANDIDATES_FOR_AI` | 语义筛选候选中为群聊保留的名额，默认 10 |
+| `MAX_CHAT_SOURCES_FOR_MODEL` | 有整理笔记时最终最多采用的群聊来源数，默认 3 |
+| `CODED_TERM_GROUPS_JSON` | 自定义正式名称与代称的 JSON 对照表 |
 
 ### 安全要求
 

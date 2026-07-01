@@ -63,6 +63,8 @@ SOURCE_EXCERPT_CHARS = int(os.getenv("SOURCE_EXCERPT_CHARS", "100"))
 MAX_FILES_PER_QUERY = int(os.getenv("MAX_FILES_PER_QUERY", "160"))
 MAX_CHUNKS_FOR_MODEL = int(os.getenv("MAX_CHUNKS_FOR_MODEL", "8"))
 MAX_CANDIDATES_FOR_AI = int(os.getenv("MAX_CANDIDATES_FOR_AI", "30"))
+MAX_CHAT_CANDIDATES_FOR_AI = max(0, int(os.getenv("MAX_CHAT_CANDIDATES_FOR_AI", "10")))
+MAX_CHAT_SOURCES_FOR_MODEL = max(0, int(os.getenv("MAX_CHAT_SOURCES_FOR_MODEL", "3")))
 DRIVE_INDEX_TTL_SECONDS = int(os.getenv("DRIVE_INDEX_TTL_SECONDS", "900"))
 OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "45"))
 AI_RETRIEVAL_MODE = os.getenv("AI_RETRIEVAL_MODE", "ai").strip().lower()
@@ -78,6 +80,34 @@ MENTOR_CHAT_ALIAS_KEYS = frozenset(
 )
 CHAT_CONTEXT_MESSAGES = max(0, int(os.getenv("CHAT_CONTEXT_MESSAGES", "2")))
 CHAT_MENTOR_CHUNK_CHARS = max(400, int(os.getenv("CHAT_MENTOR_CHUNK_CHARS", "1600")))
+CHAT_MIN_MENTOR_CHUNK_CHARS = max(1, int(os.getenv("CHAT_MIN_MENTOR_CHUNK_CHARS", "12")))
+
+
+def load_coded_term_groups() -> dict[str, tuple[str, ...]]:
+    configured: dict[str, Any] = {}
+    raw = os.getenv("CODED_TERM_GROUPS_JSON", "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                configured = parsed
+        except json.JSONDecodeError:
+            configured = {}
+
+    merged: dict[str, tuple[str, ...]] = {}
+    for canonical, aliases in configured.items():
+        values = aliases if isinstance(aliases, list) else [aliases]
+        normalized = tuple(dict.fromkeys(
+            str(value).strip()
+            for value in [canonical, *values]
+            if str(value).strip()
+        ))
+        if normalized:
+            merged[str(canonical).strip()] = normalized
+    return merged
+
+
+CODED_TERM_GROUPS = load_coded_term_groups()
 
 MIME_FOLDER = "application/vnd.google-apps.folder"
 MIME_DOC = "application/vnd.google-apps.document"
@@ -799,6 +829,23 @@ def useful_chat_text(value: str) -> str:
     return text if placeholders.strip() else ""
 
 
+def clean_mentor_chat_text(value: str) -> str:
+    text = useful_chat_text(value)
+    if not text:
+        return ""
+    # Exported replies often append another member's quoted message. It is context, not mentor evidence.
+    return re.sub(r"\s*\[引用[^\n]*$", "", text).strip()
+
+
+def mentor_messages_are_substantive(messages: list[dict[str, str]]) -> bool:
+    combined = " ".join(message["text"] for message in messages)
+    meaningful_chars = re.findall(r"[\w\u4e00-\u9fff]", combined, flags=re.UNICODE)
+    if len(meaningful_chars) < CHAT_MIN_MENTOR_CHUNK_CHARS:
+        return False
+    casual = re.sub(r"[^\w\u4e00-\u9fff]+", "", combined, flags=re.UNICODE).casefold()
+    return casual not in {"哈哈", "哈哈哈", "好的", "是的", "对", "嗯", "可以", "收到", "笑死", "牛"}
+
+
 def make_mentor_chat_chunk(
     file: dict[str, Any],
     mentor_messages: list[dict[str, str]],
@@ -831,17 +878,18 @@ def split_mentor_chat_into_chunks(file: dict[str, Any], content: str) -> list[di
 
     def flush() -> None:
         nonlocal mentor_buffer, pending_context
-        if mentor_buffer:
+        if mentor_buffer and mentor_messages_are_substantive(mentor_buffer):
             chunks.append(make_mentor_chat_chunk(file, mentor_buffer, pending_context, len(chunks)))
         mentor_buffer = []
         pending_context = []
 
     for message in messages:
-        text = useful_chat_text(message["text"])
+        mentor_message = is_mentor_speaker(message["speaker"])
+        text = clean_mentor_chat_text(message["text"]) if mentor_message else useful_chat_text(message["text"])
         if not text:
             continue
         cleaned = {**message, "text": text}
-        if not is_mentor_speaker(cleaned["speaker"]):
+        if not mentor_message:
             flush()
             if CHAT_CONTEXT_MESSAGES:
                 recent_context = [*recent_context, cleaned][-CHAT_CONTEXT_MESSAGES:]
@@ -893,9 +941,71 @@ def tokenize(text: str) -> list[str]:
     return list(dict.fromkeys([*word_tokens, *cjk_bigrams]))
 
 
+def term_appears(text: str, term: str) -> bool:
+    if not term:
+        return False
+    if term.isascii() and re.fullmatch(r"[A-Za-z0-9_\-]+", term):
+        return bool(re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text, flags=re.IGNORECASE))
+    return term.casefold() in text.casefold()
+
+
+def matched_coded_term_groups(text: str) -> list[tuple[str, tuple[str, ...]]]:
+    return [
+        (canonical, terms)
+        for canonical, terms in CODED_TERM_GROUPS.items()
+        if any(term_appears(text, term) for term in terms)
+    ]
+
+
+def expanded_retrieval_terms(query: str) -> list[str]:
+    terms = list(tokenize(query))
+    for _, equivalents in matched_coded_term_groups(query):
+        for equivalent in equivalents:
+            terms.extend(tokenize(equivalent))
+    return list(dict.fromkeys(terms))
+
+
+def coded_term_guidance(query: str) -> str:
+    groups = matched_coded_term_groups(query)
+    if not groups:
+        return "None"
+    return "; ".join(
+        f"{canonical} = {' / '.join(term for term in equivalents if term != canonical)}"
+        for canonical, equivalents in groups
+    )
+
+
+def prioritize_ranked_candidates(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
+    documents = [item for item in items if item.get("sourceType") != "mentor_chat"]
+    chats = [item for item in items if item.get("sourceType") == "mentor_chat"]
+    chat_quota = min(MAX_CHAT_CANDIDATES_FOR_AI, limit)
+    document_quota = max(0, limit - chat_quota)
+    selected = [*documents[:document_quota], *chats[:chat_quota]]
+    selected_ids = {item["id"] for item in selected}
+    if len(selected) < limit:
+        leftovers = [item for item in items if item["id"] not in selected_ids]
+        selected.extend(leftovers[:limit - len(selected)])
+    return selected
+
+
+def prioritize_selected_sources(items: list[dict[str, Any]], limit: int = MAX_CHUNKS_FOR_MODEL) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
+    documents = [item for item in items if item.get("sourceType") != "mentor_chat"]
+    chats = [item for item in items if item.get("sourceType") == "mentor_chat"]
+    if not documents:
+        return chats[:limit]
+    selected_documents = documents[:limit]
+    remaining = max(0, limit - len(selected_documents))
+    selected_chats = chats[:min(MAX_CHAT_SOURCES_FOR_MODEL, remaining)]
+    return [*selected_documents, *selected_chats]
+
+
 def rough_rank_chunks(query: str, chunks: list[dict[str, Any]], limit: int = MAX_CANDIDATES_FOR_AI) -> list[dict[str, Any]]:
     """Only a coarse candidate reducer. It does not judge topic."""
-    terms = tokenize(query)
+    terms = expanded_retrieval_terms(query)
     raw_query = query.lower()
     scored = []
     for item in chunks:
@@ -910,7 +1020,8 @@ def rough_rank_chunks(query: str, chunks: list[dict[str, Any]], limit: int = MAX
             scored.append({**item, "roughScore": score})
     if not scored:
         scored = [{**item, "roughScore": 0} for item in chunks[:limit]]
-    return sorted(scored, key=lambda item: item["roughScore"], reverse=True)[:limit]
+    ranked = sorted(scored, key=lambda item: item["roughScore"], reverse=True)
+    return prioritize_ranked_candidates(ranked, limit)
 
 
 def note_coverage(candidates: list[dict[str, Any]]) -> dict[str, Any]:
@@ -959,7 +1070,7 @@ def parse_message_and_mode(payload: dict[str, Any]) -> tuple[str, str]:
 
 def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
     if not OPENAI_API_KEY:
-        fallback = candidates[:MAX_CHUNKS_FOR_MODEL]
+        fallback = prioritize_selected_sources(candidates)
         for item in fallback:
             item["aiTopic"] = "AI topic judgment disabled"
         return {
@@ -984,12 +1095,15 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
         "You are a retrieval judge for a private knowledge base.",
         "Do not classify the user topic by hard-coded keywords. Judge semantically from the user intent and candidate snippets.",
         "Pick up to 8 snippets that can truly help answer the user question, and produce a natural-language topic label.",
+        "Curated document snippets are the primary knowledge source. mentor_chat snippets are supplementary and are usually less complete.",
+        f"When relevant document snippets exist, select them first and select at most {MAX_CHAT_SOURCES_FOR_MODEL} mentor_chat snippets.",
         "For mentor_chat snippets, excerpt contains Brind's statements. chat_context_only contains other members' nearby messages and may help identify the question, but it is not evidence of Brind's view.",
         "If none of the candidates are relevant, return an empty selected_ids array.",
         "Return JSON only, no Markdown.",
         "Schema: {\"topic\":\"...\",\"confidence\":\"high|medium|low\",\"selected_ids\":[\"...\"],\"reason\":\"...\"}",
         "",
         f"User question: {query}",
+        f"Knowledge-base coded-term equivalences: {coded_term_guidance(query)}",
         "",
         "Candidate snippets:",
         json.dumps(compact_candidates, ensure_ascii=False),
@@ -997,7 +1111,7 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
     try:
         judgment = parse_json_object(openai_request(prompt))
     except Exception as exc:
-        fallback = candidates[:MAX_CHUNKS_FOR_MODEL]
+        fallback = prioritize_selected_sources(candidates)
         for item in fallback:
             item["aiTopic"] = "AI judgment failed"
         return {
@@ -1008,9 +1122,9 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
         }
 
     selected_ids = set(judgment.get("selected_ids", []))
-    selected = [item for item in candidates if item["id"] in selected_ids]
+    selected = prioritize_selected_sources([item for item in candidates if item["id"] in selected_ids])
     if not selected and candidates:
-        selected = candidates[: min(3, MAX_CHUNKS_FOR_MODEL)]
+        selected = prioritize_selected_sources(candidates, min(3, MAX_CHUNKS_FOR_MODEL))
     topic = judgment.get("topic") or "Not judged"
     for item in selected:
         item["aiTopic"] = topic
@@ -1023,7 +1137,7 @@ def ai_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str,
 
 
 def fast_select_context(query: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
-    selected = candidates[:MAX_CHUNKS_FOR_MODEL]
+    selected = prioritize_selected_sources(candidates)
     for item in selected:
         item["aiTopic"] = "Fast retrieval mode"
     return {
@@ -1413,6 +1527,7 @@ def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: 
         "9. For every source number cited in answer, add one source_evidence item with citation and evidence. Evidence must be a concise paraphrase, not a long quote, and must match the cited claim.",
         "10. Do not cite a source unless its source_evidence can clearly support the cited claim.",
         "11. In mentor_chat sources, only the Brind/mentor evidence is authoritative. Other members' chat context may clarify the question but must never be presented or cited as Brind's opinion.",
+        "12. Curated document notes outrank mentor_chat sources. Use chat only as supplementary evidence; if they conflict, follow the curated notes and briefly acknowledge uncertainty.",
         "JSON schema: {\"answer\":\"...\",\"source_evidence\":[{\"citation\":1,\"evidence\":\"what this source supports, <=100 Chinese characters or <=55 English words\"}]}",
         "",
         "Answer mode rules:",
@@ -1421,6 +1536,7 @@ def build_answer_prompt(query: str, matches: list[dict[str, Any]], ai_judgment: 
         f"Retrieval mode/topic signal: {ai_judgment.get('topic', 'Not judged')}",
         f"Retrieval note: {ai_judgment.get('reason', '')}",
         f"User question: {query}",
+        f"Knowledge-base coded-term equivalences: {coded_term_guidance(query)}",
         "",
         "Live Google Drive sources selected by AI:",
         context or "None",
