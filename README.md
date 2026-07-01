@@ -1,309 +1,319 @@
-# Brind Mentor 用户手册
+# Brind Mentor User Guide
 
 > 心安之处是成熙！
 
-Brind Mentor 是一个基于往期 LBC 笔记的私人轻量 RAG AI 导师。项目开发于 38C 期，当前知识库以 38C 笔记为主，今后可以继续加入更多期次。
+Brind Mentor is a private, lightweight RAG assistant built from previous LBC notes. The project began during cohort 38C. Its knowledge base currently focuses on 38C material and can be expanded with notes from future classes.
 
-感谢所有参与整理 LBC 笔记的小伙伴。
+Thank you to everyone who helped collect, organize, and maintain the LBC notes.
 
-它会从知识库中寻找与问题相关的内容，再用导师式的结构帮助你理解结论、机制、限制和风险。它不是 Brind 本人，也不能替代原课程、原始笔记或专业意见。
+The application retrieves relevant material from the knowledge base and turns it into a structured, mentor-style explanation of conclusions, mechanisms, constraints, and risks. It is not Brind, and it does not replace the original course, source notes, or professional advice.
 
-##  RAG 链路
+## Current Knowledge Coverage
 
-Brind Mentor 具备完整的 RAG 链路：
+The knowledge base currently includes:
+
+- **LBC38** — curated notes and group chat history. This collection is actively maintained and continues to receive updates.
+- **LBC37** — group chat notes and discussion records.
+
+Coverage will continue to grow as additional approved material is added to the connected Google Drive knowledge base.
+
+## How the RAG Pipeline Works
 
 ```mermaid
 flowchart LR
-    A["Google Drive 往期笔记"] --> B["内存解析与分块"]
-    B --> C["候选内容检索"]
-    C --> D["AI 语义筛选（ai 模式）"]
-    D --> E["笔记增强的回答生成"]
-    E --> F["编号引用与 Source 摘要"]
+    A["LBC notes in Google Drive"] --> B["In-memory parsing and chunking"]
+    B --> C["Candidate retrieval"]
+    C --> D["AI semantic selection in ai mode"]
+    D --> E["Evidence-grounded answer generation"]
+    E --> F["Numbered citations and Source summaries"]
 ```
 
-| RAG 元素 | 本项目中的实现 |
+| RAG component | Implementation |
 | --- | --- |
-| **Knowledge Base** | Google Drive 中的 38C 往期笔记，未来可扩充更多期次。 |
-| **Indexing** | 服务启动或刷新时，在进程内存中解析文件、切分文本并建立临时索引。 |
-| **Retrieval** | 先用文本匹配缩小候选范围；`ai` 模式再进行语义判断和筛选。 |
-| **Augmentation** | 把选中的笔记片段作为上下文交给模型，而不是让模型脱离资料自由回答。 |
-| **Generation** | 模型结合问题、回答模式和检索证据生成导师式答案。 |
-| **Grounding** | 回答使用 `[1]`、`[2]` 等编号关联 Source，便于核对依据。 |
+| **Knowledge base** | LBC notes and approved chat exports stored in Google Drive. |
+| **Indexing** | Files are parsed and split into temporary text chunks when the service starts or refreshes. |
+| **Retrieval** | Text matching narrows the candidate set; `ai` mode adds semantic selection. |
+| **Augmentation** | Selected chunks are supplied to the answer model as evidence. |
+| **Generation** | The model combines the question, answer mode, and retrieved evidence. |
+| **Grounding** | Citations such as `[1]` and `[2]` connect claims to short Source summaries. |
 
-这是一种偏隐私和轻部署的 RAG 架构：
+This is a privacy-oriented, lightweight RAG architecture:
 
-- 不把私人笔记提交到 GitHub。
-- 不把知识库持久化到本地磁盘。
-- 不使用长期保存的向量数据库或知识库快照。
-- 索引保存在服务进程内存中，服务重启后会重新建立。
+- Private notes are not committed to GitHub.
+- Source documents are not persisted to the application directory.
+- The project does not maintain a long-lived vector database or knowledge snapshot.
+- The index exists only in process memory and is rebuilt after a service restart.
 
-当前实现没有使用传统的 embedding 向量库。`fast` 模式采用快速文本候选检索；`ai` 模式在此基础上增加 AI 语义筛选。RAG 是“先检索、再增强生成”的系统方式，并不要求一定使用向量数据库。
+The current implementation does not require a traditional embedding database. `fast` mode uses lightweight text retrieval. `ai` mode adds a semantic judging step before answer generation.
 
-## 快速开始
+## Quick Start
 
-1. 此项目部署在Render上[Brind Mentor](https://mentorbrind-ai.onrender.com)。
-2. 如果页面要求访问码，输入访问码并点击 **Unlock**。
-3. 查看侧栏：
-   - **Health** 显示 `Ready`，表示服务可以使用。
-   - **Knowledge Index** 显示 `Cached`，表示笔记索引已经准备好。
-   - 如果显示 `Building`，等待索引完成后再提问。
-4. 在 **Answer Mode** 中选择回答方式。
-5. 在页面底部输入问题，点击 **Send**。
+1. Open [Brind Mentor](https://mentorbrind-ai.onrender.com).
+2. If prompted, enter the access code and select **Unlock**.
+3. Check the sidebar:
+   - **Health: Ready** means the service is available.
+   - **Knowledge Index: Cached** means the knowledge base is ready.
+   - If the index shows `Building`, wait for it to finish before asking a question.
+4. Choose an **Answer Mode**.
+5. Enter a question at the bottom of the page and select **Send**.
 
-首次启动或知识库刚刷新时，系统可能需要一些时间读取笔记。
+The first startup or a full knowledge-base refresh may take additional time.
 
-## 可以问什么
+## What You Can Ask
 
-适合的问题包括：
+Good questions include:
 
-- 某只股票背后的行业逻辑、竞争格局和风险。
-- 一种心理现象或关系困境应当如何拆解。
-- AI、商业、教育或社会话题背后的机制。
-- 某个 LBC 课程观点在现实问题中的应用。
-- 对一个判断进行反证，寻找隐藏假设和边界条件。
+- The industry logic, competition, and risks behind a company or market theme.
+- How to break down a psychological pattern or relationship difficulty.
+- The mechanisms behind AI, business, education, or social trends.
+- How an LBC concept applies to a real-world problem.
+- A challenge to an assumption, including counterexamples and boundary conditions.
 
-示例：
+Examples:
 
 ```text
-从笔记的角度分析机器人概念上涨的逻辑，哪些是叙事，哪些是基本面？
+Using the notes, separate the narrative from the fundamentals behind a robotics market rally.
 ```
 
 ```text
-为什么人在亲密关系中会不断寻求确认？请用初学者能理解的方式解释。
+Why do people repeatedly seek reassurance in close relationships? Explain it for a beginner.
 ```
 
 ```text
-挑战一下“AI 会替代大部分白领工作”这个判断。
+Challenge the claim that AI will replace most white-collar work.
 ```
 
-## 怎样获得更好的回答
+## How to Get Better Answers
 
-问题越具体，检索通常越准确。一个好问题最好包含：
+Retrieval is usually more accurate when the question includes:
 
-- **对象**：你想分析什么。
-- **角度**：你关心机制、风险、估值、心理还是行动建议。
-- **范围**：短期还是长期，个人还是行业，笔记内还是允许适度延伸。
-- **输出要求**：需要结论、分层解释、反方观点或严格引用。
+- **Subject** — what you want to analyze.
+- **Angle** — mechanism, risk, valuation, psychology, or action.
+- **Scope** — short or long term, individual or industry, notes only or cautious extension.
+- **Output** — conclusion, layered explanation, opposing view, or strict citations.
 
-推荐写法：
+A useful structure is:
 
 ```text
-对象 + 你真正想判断的问题 + 希望采用的分析方式
+Subject + the judgment you need to make + the analysis style you want
 ```
 
-不要只输入一个过于宽泛的词，例如“股票”或“爱情”。
+Avoid single broad terms such as “stocks” or “relationships.”
 
-## 回答模式
+## Answer Modes
 
-| 模式 | 适合场景 | 回答特点 |
+| Mode | Best for | Behavior |
 | --- | --- | --- |
-| `mentor` | 日常分析 | 先给结论，再解释机制、约束和风险。 |
-| `strict citation` | 核对笔记依据 | 重要判断尽量附引用；笔记没有支持时会明确说明。 |
-| `beginner explanation` | 初次接触某个主题 | 减少术语，分层解释，必要时使用简单类比。 |
-| `challenge assumptions` | 检查一个判断是否站得住 | 先找隐藏假设，再给反例、边界条件和最终判断。 |
+| `mentor` | Everyday analysis | Starts with a conclusion, then explains mechanisms, constraints, and risks. |
+| `strict citation` | Verifying note support | Cites important claims and says when the notes do not support a conclusion. |
+| `beginner explanation` | New topics | Uses less jargon, layered explanations, and simple analogies when helpful. |
+| `challenge assumptions` | Stress-testing a claim | Identifies hidden assumptions, counterexamples, boundary conditions, and a final judgment. |
 
-不确定时，使用默认的 `mentor` 即可。
+Use `mentor` when you are unsure which mode to choose.
 
-## 如何阅读回答
+## How to Read an Answer
 
-### 正文
+### Answer text
 
-回答会优先采用笔记中的思路，再在必要时进行推理延伸。如果笔记覆盖不足，系统应当提示你哪些内容来自笔记，哪些属于延伸判断。
+The answer should prioritize retrieved note logic. When note coverage is incomplete, the model may make a cautious extension and should distinguish that analysis from direct note support.
 
-回答中的 `[1]`、`[2]` 等编号对应下方的 Source。
+Citation numbers such as `[1]` and `[2]` correspond to the Source cards below the answer.
 
-### Source
+### Sources
 
-每条 Source：
+Each Source card:
 
-- 对应回答中的同号引用。
-- 显示与当前问题最相关的句子及少量前后文。
-- 默认最多显示 100 个字符。
-- 不显示 Google Drive 文件路径或私人文件标识。
+- corresponds to the same citation number in the answer;
+- summarizes the evidence supporting the cited claim;
+- displays at most 100 characters by default; and
+- hides private Google Drive paths and file identifiers.
 
-Source 是核对回答方向的短摘录，不是原笔记全文。如果需要确认完整语境，应回到原始笔记阅读。
+A Source is a short verification aid, not the complete original note. Consult the original material when full context matters.
 
-### AI topic 与 note coverage
+### AI topic and note coverage
 
-- **AI topic**：系统对当前问题主题的概括。
-- **confidence**：主题判断的置信度。
-- **note coverage**：笔记对问题的覆盖程度，分为 `high`、`medium` 和 `low`。
+- **AI topic** summarizes the interpreted subject of the question.
+- **confidence** describes confidence in the retrieval judgment.
+- **note coverage** indicates how strongly the knowledge base covers the question: `high`, `medium`, or `low`.
 
-`note coverage: high` 代表检索匹配较强，但不保证回答一定正确；仍应结合 Source 和原笔记判断。
+High coverage means retrieval overlap is strong; it does not guarantee that the answer is correct.
 
-## 侧栏说明
+## Sidebar Reference
 
 ### System
 
-| 状态 | 含义 |
+| Status | Meaning |
 | --- | --- |
-| **App: Unlocked / Open** | 已通过访问控制，或当前未启用访问码 |
-| **Google: Connected** | 系统可以读取已配置的 Google Drive 知识库 |
-| **OAuth: Available** | 可以使用 Google 登录作为备用连接方式(由于隐私需要，权限仅授予管理员） |
-| **OpenAI: Configured** | AI 回答功能已配置 |
-| **Local Data: No** | 原始知识库文件不会保存到应用的本地目录 |
-| **Health: Ready** | 当前配置可正常使用 |
+| **App: Unlocked / Open** | Access control has been passed or is disabled. |
+| **Google: Connected** | The configured Google Drive knowledge base is available. |
+| **OAuth: Available** | Administrator Google sign-in is available as a backup connection method. |
+| **OpenAI: Configured** | AI retrieval and answer generation are configured. |
+| **Local Data: No** | Source knowledge files are not written to the application directory. |
+| **Health: Ready** | Required services are configured and available. |
 
 ### Knowledge Index
 
-| 项目 | 含义 |
+| Field | Meaning |
 | --- | --- |
-| **Status** | `Cached` 表示可用，`Building` 表示正在更新，`Empty` 表示尚未建立索引 |
-| **Refresh In** | 距离系统自动检查知识库更新的时间 |
-| **Files** | 本次索引读取的文件数 |
-| **Chunks** | 笔记被拆分后的文本片段数 |
-| **Skipped** | 未能读取的文件数 |
-| **Last refresh** | 最近一次刷新中读取、复用、变更、移除和跳过的数量 |
+| **Status** | `Cached` is ready, `Building` is updating, and `Empty` has no index. |
+| **Refresh In** | Time until the next automatic knowledge-base check. |
+| **Files** | Number of files scanned for the current index. |
+| **Chunks** | Number of text chunks created from the files. |
+| **Skipped** | Files that could not be read or parsed. |
+| **Last refresh** | Counts for read, reused, changed, removed, and skipped files. |
 
-## 更新知识库
+## Updating the Knowledge Base
 
-当 Google Drive 中的笔记有新增或修改时：
+After adding or modifying files in Google Drive:
 
-1. 点击侧栏 **Knowledge Index** 右上角的 **Refresh**。
-2. Status 变为 `Building`。
-3. 等待 Status 回到 `Cached`。
-4. 查看 **Last refresh**，确认是否检测到 changed、removed 或 skipped 文件。
+1. Select **Refresh** in the **Knowledge Index** panel.
+2. Wait while the status shows `Building`.
+3. Continue when the status returns to `Cached`.
+4. Review **Last refresh** for changed, removed, or skipped files.
 
-刷新在后台进行。刷新期间可以保留页面，但建议等索引完成后再询问刚更新的内容。
+Refreshing runs in the background. Wait for it to finish before asking about newly added material.
 
-## 当 Source 看起来不相关
+## When a Source Looks Unrelated
 
-可能原因包括：
+Possible causes include:
 
-- 问题太宽泛，多个主题使用了相同词语。
-- 笔记对该问题的直接覆盖较少。
-- 系统使用了 `Fast retrieval mode`，只进行快速候选检索。
-- Source 是短摘录，完整语境位于原笔记中。
+- The question is too broad.
+- Several topics use the same vocabulary.
+- The notes have weak direct coverage.
+- `Fast retrieval mode` is enabled.
+- The Source is a short summary while the complete context remains in the original note.
 
-可以尝试：
+Try the following:
 
-1. 把问题改得更具体，加入对象、时间和判断角度。
-2. 使用 `strict citation` 模式重新提问。
-3. 点击 **Refresh**，确保索引是最新的。
-4. 如果页面显示 `Fast retrieval mode`，请管理员启用语义检索模式。
+1. Add a specific subject, time frame, and judgment angle.
+2. Ask again using `strict citation` mode.
+3. Refresh the index.
+4. If the interface shows `Fast retrieval mode`, ask the administrator to enable semantic retrieval.
 
-## 隐私与数据边界
+## Privacy and Data Boundaries
 
-- Google Drive 笔记只在服务进程内存中读取和建立索引。
-- 原始笔记、提取文本和知识库快照不会提交到 GitHub。
-- 页面只展示被选中的短 Source，不公开 Drive ID 和文件路径。
-- 应用访问码只是轻量访问控制，不等同于完整的企业身份系统。
-- 不要在问题中输入密码、API Key、身份证件或其他不必要的敏感信息。
+- Google Drive material is read into the service's in-memory index.
+- Original notes, extracted text, and knowledge snapshots are not committed to GitHub.
+- The interface exposes only selected short Source summaries, not Drive IDs or paths.
+- The access code is lightweight protection, not a full enterprise identity system.
+- Do not enter passwords, API keys, identity documents, or unnecessary personal information.
 
-## 使用边界
+## Responsible Use
 
-Brind Mentor 提供的是学习与分析辅助：
+Brind Mentor is a learning and analysis assistant:
 
-- 股票和金融内容不构成投资建议。
-- 医疗内容不构成诊断、处方或用药指导。
-- 心理和关系内容不能替代专业咨询或紧急支持。
-- AI 可能误解笔记、遗漏语境或生成错误结论。
+- Financial content is not investment advice.
+- Medical content is not a diagnosis, prescription, or medication instruction.
+- Psychological and relationship content does not replace professional or emergency support.
+- AI may misunderstand notes, miss context, or generate an incorrect conclusion.
 
-涉及资金、健康、安全或法律后果时，请使用可靠的一手资料并咨询合格专业人士。
+For decisions involving money, health, safety, or legal consequences, consult reliable primary sources and qualified professionals.
 
-## 常见问题
+## Frequently Asked Questions
 
-### 页面显示 Locked
+### The page shows Locked
 
-输入管理员提供的访问码并点击 **Unlock**。如果访问码失效，请联系管理员。
+Enter the administrator-provided access code and select **Unlock**.
 
-### Health 显示 Setup needed
+### Health shows Setup needed
 
-说明 Google Drive、OpenAI 或服务配置不完整。普通用户无法在页面内修复，请把侧栏提示发给管理员。
+Google Drive, OpenAI, or another required setting is incomplete. Send the sidebar status to the administrator.
 
-### Knowledge Index 一直显示 Building
+### Knowledge Index remains Building
 
-大型 PDF 或 DOCX 需要更长时间。如果长时间没有完成，刷新页面后查看 Health 提示，并联系管理员检查服务日志。
+Large PDF and DOCX files can take longer to process. If the status does not change, reload the page and ask the administrator to inspect the service logs.
 
-### 回答很慢
+### Answers are slow
 
-首次建立索引、语义检索和较长问题都会增加等待时间。尽量一次只问一个明确问题。
+Initial indexing, semantic retrieval, and long questions increase latency. Ask one focused question at a time.
 
-### 回答引用了笔记中没有的结论
+### An answer contains a claim that is not in the notes
 
-切换到 `strict citation`，缩小问题范围，并检查对应 Source。重要结论应回到原始笔记核对。
+Use `strict citation`, narrow the question, and inspect the corresponding Sources. Verify important conclusions against the original notes.
 
-### 新笔记没有出现在回答中
+### A new note does not appear in answers
 
-点击 **Refresh**，等待状态回到 `Cached` 后重新提问。
+Select **Refresh**, wait for `Cached`, and ask again.
 
-### 系统会记住之前的对话吗
+### Does the system remember previous messages?
 
-当前版本主要按单次问题检索知识库。后续问题最好写明必要背景，不要假设系统完整记住前文。
+The current version retrieves mainly from each individual question. Include necessary context in follow-up questions.
 
-## 支持的知识库文件
+## Supported Knowledge Files
 
 - Google Docs
-- TXT 与 Markdown
+- TXT and Markdown
 - PDF
 - DOCX
 - RTF
-- 旧版 `.doc`（仅尽力解析，建议转换为 DOCX 或 Google Docs）
+- Legacy `.doc` files on a best-effort basis; conversion to DOCX or Google Docs is recommended
 
-扫描版 PDF、图片和手写内容目前不支持 OCR。
+Scanned PDFs, images, and handwriting are not currently processed with OCR.
 
-### 群聊记录的导师优先索引
+## Group Chat History
 
-放在 Google Drive `chat history` 文件夹中的 TXT 群聊导出会使用专用解析逻辑：
+TXT chat exports placed in the Google Drive `chat history` folder use a dedicated mentor-first indexing pipeline:
 
-- 只有 Brind 的发言进入知识正文并作为回答依据。
-- Brind 发言前最多两条群友消息仅作为提问语境，不能被引用为 Brind 的观点。
-- 图片、视频、表情等没有文字内容的占位消息不会进入索引。
-- 过短寒暄、单独回应和转贴引用不会作为导师知识块。
-- 默认识别 `Brind`、`张成熙` 和 `Brind张成熙`；如群昵称不同，可通过 `MENTOR_CHAT_ALIASES` 增加别名。
+- Only messages from configured mentor aliases become mentor evidence.
+- Up to two preceding member messages may be retained as context only.
+- Other members' messages cannot be cited as mentor opinions.
+- Media placeholders, short acknowledgements, casual replies, and quoted reposts are filtered out.
+- Additional mentor aliases can be configured with `MENTOR_CHAT_ALIASES`.
 
-整理笔记是主知识库，群聊记录是补充知识库。候选检索默认给整理笔记保留 20 个席位、群聊保留 10 个席位；最终回答在存在相关笔记时最多采用 3 个群聊来源，避免聊天记录因数量庞大而淹没整理笔记。
+Curated notes remain the primary knowledge source. By default, retrieval reserves 20 of 30 candidate positions for documents and 10 for chat. When relevant documents are available, the final model may use at most three chat sources. If curated notes and chat conflict, curated notes take priority.
 
-上传或替换聊天记录后，点击侧栏 **Refresh**，等待索引状态恢复为 `Cached`。
+After uploading or replacing a chat export, select **Refresh** and wait for `Cached`.
 
-### 私有术语配置
+## Private Term Configuration
 
-系统支持通过 `CODED_TERM_GROUPS_JSON` 环境变量配置正式名称与代称的双向检索。具体对应关系属于部署配置，不写入代码、README 或 Git 历史。例如：
+Private term-equivalence groups can be configured through the `CODED_TERM_GROUPS_JSON` environment variable. Actual mappings should remain deployment secrets and must not be written to source code, documentation, tests, commits, or pull requests.
+
+Generic format:
 
 ```json
 {"canonical term":["private alias 1","private alias 2"]}
 ```
 
-## 维护者附录
+## Maintainer Appendix
 
-普通用户不需要阅读本节。
+Regular users do not need this section.
 
-### 本地预览
+### Local preview
 
-要求 Python 3.11 或更高版本：
+Python 3.11 or newer is required.
 
 ```powershell
 Copy-Item .env.example .env
 powershell -ExecutionPolicy Bypass -File .\scripts\preview.ps1
 ```
 
-然后打开 `http://localhost:4173`。
+Open `http://localhost:4173`.
 
-### 主要配置
+### Main configuration
 
-完整配置模板见 `.env.example`，轻量部署模板见 `render.yaml`。最常调整的项目是：
+See `.env.example` for the complete template and `render.yaml` for the lightweight deployment template.
 
-| 变量 | 用途 |
+| Variable | Purpose |
 | --- | --- |
-| `AI_RETRIEVAL_MODE` | `ai` 使用语义筛选；`fast` 延迟更低但相关性较弱 |
-| `SOURCE_EXCERPT_CHARS` | Source 摘要的最大字符数，默认 100 |
-| `DRIVE_INDEX_TTL_SECONDS` | 自动重新检查知识库的间隔 |
-| `OPENAI_MODEL` | 回答与语义判断使用的模型 |
-| `MENTOR_CHAT_ALIASES` | 群聊中导师昵称的英文逗号分隔列表 |
-| `CHAT_CONTEXT_MESSAGES` | 每个导师发言块保留的前置群友消息数，默认 2 |
-| `CHAT_MENTOR_CHUNK_CHARS` | 连续导师发言的目标分块长度，默认 1600 |
-| `CHAT_MIN_MENTOR_CHUNK_CHARS` | 群聊导师知识块的最少有效字符数，默认 12 |
-| `MAX_CHAT_CANDIDATES_FOR_AI` | 语义筛选候选中为群聊保留的名额，默认 10 |
-| `MAX_CHAT_SOURCES_FOR_MODEL` | 有整理笔记时最终最多采用的群聊来源数，默认 3 |
-| `CODED_TERM_GROUPS_JSON` | 自定义正式名称与代称的 JSON 对照表 |
+| `AI_RETRIEVAL_MODE` | `ai` enables semantic selection; `fast` reduces latency with weaker relevance. |
+| `SOURCE_EXCERPT_CHARS` | Maximum Source summary length; default 100. |
+| `DRIVE_INDEX_TTL_SECONDS` | Interval between automatic knowledge-base checks. |
+| `OPENAI_MODEL` | Model used for retrieval judgment and answer generation. |
+| `MENTOR_CHAT_ALIASES` | Comma-separated mentor names recognized in chat exports. |
+| `CHAT_CONTEXT_MESSAGES` | Number of preceding member messages kept as context; default 2. |
+| `CHAT_MENTOR_CHUNK_CHARS` | Target size for grouped mentor chat chunks; default 1600. |
+| `CHAT_MIN_MENTOR_CHUNK_CHARS` | Minimum meaningful size for mentor chat chunks; default 12. |
+| `MAX_CHAT_CANDIDATES_FOR_AI` | Chat positions in the semantic candidate pool; default 10. |
+| `MAX_CHAT_SOURCES_FOR_MODEL` | Maximum chat sources when relevant documents exist; default 3. |
+| `CODED_TERM_GROUPS_JSON` | Private canonical-term and alias groups supplied at deployment. |
 
-### 安全要求
+### Security requirements
 
-不要提交以下内容：
+Never commit:
 
-- `.env`
-- Google 服务账号 JSON
-- OAuth Token 或 OpenAI API Key
-- 下载后的 Drive 文件
-- 提取文本、知识库快照或包含私人笔记的日志和截图
-
+- `.env`;
+- Google service-account JSON;
+- OAuth tokens or OpenAI API keys;
+- downloaded Drive files;
+- private term mappings;
+- extracted note text, knowledge snapshots, or logs and screenshots containing private material.
